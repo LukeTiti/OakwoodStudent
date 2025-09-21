@@ -21,7 +21,35 @@ class AppInfo: ObservableObject {
     @Published var signInSheet = false
     @Published var classes: [ClassS] = []
     @Published var fetchedGrades: [String] = []
+    @Published var info: [Int: Bool] = [:] {
+        didSet {
+            saveInfo()
+        }
+    }
+    
+    init() {
+        loadInfo()
+    }
+    
+    private func saveInfo() {
+        if let encoded = try? JSONEncoder().encode(info) {
+            UserDefaults.standard.set(encoded, forKey: "assignmentInfo")
+        }
+    }
+    
+    private func loadInfo() {
+        if let data = UserDefaults.standard.data(forKey: "assignmentInfo"),
+           let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
+            info = decoded
+        }
+    }
+    
+    // Optional helper
+    func toggleInfo(for id: Int) {
+        info[id] = !(info[id] ?? false)
+    }
 }
+
 
 struct ClassS: Identifiable {
     var id = UUID()

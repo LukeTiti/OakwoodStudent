@@ -37,7 +37,6 @@ struct Assignment: Codable, Identifiable {
     var raw_score: String?
     var maximum_score: Int?
     var due_date: String?
-    var completed: Bool? = false
 }
 
 // MARK: - Main View
@@ -45,7 +44,7 @@ struct VeracrossGradesView: View {
     @State private var isLoggedIn = false
     @State private var courses: [Course] = []
     @State private var errorMessage: String?
-
+    
     var body: some View {
         NavigationView {
             if !isLoggedIn {
@@ -94,13 +93,14 @@ struct VeracrossGradesView: View {
                                 }
                                 .padding(.vertical, 4)
                             }
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    Task { await loadGrades() }
-                                } label: {
-                                    Label("Refresh", systemImage: "arrow.clockwise")
-                                }
-                                .tint(.blue)
+                        }
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button {
+                                Task { await loadGrades() }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
                             }
                         }
                     }
@@ -122,7 +122,7 @@ struct VeracrossGradesView: View {
             }
         }
     }
-
+    
     // MARK: - Networking
     func loadGrades() async {
         guard let url = URL(string: "https://portals.veracross.com/oakwood/student/component/ClassListStudent/1308/load_data") else {
@@ -209,7 +209,7 @@ struct VeracrossGradesView: View {
         }
         return false
     }
-
+    
 }
 
 struct CourseView: View {
@@ -218,66 +218,114 @@ struct CourseView: View {
     @State var course: Course?
     @State var infoSheet = false
     @State var currentAssignment: Assignment?
+    @EnvironmentObject var appInfo: AppInfo
     
+    let formatter = DateFormatter()
     var body: some View {
         List {
             if let errorMessage = errorMessage {
                 Text("⚠️ \(errorMessage)")
                     .foregroundColor(.red)
             }
-            ForEach(assignments.indices, id: \.self) { index in
-                let assignment = assignments[index]
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Button(action:{
-                            infoSheet = true
-                            currentAssignment = assignment
-                        }){
-                            Text(assignment.assignment_description ?? "No description")
-                                .font(.body)
-                        }
+            Section(header: Text("To Do")) {
+                ForEach(assignments.indices , id: \.self) { index in
+                    if appInfo.info[assignments[index].score_id, default: false] == false {
                         HStack {
-                            if let due = assignment.due_date, !due.isEmpty {
-                                Text("\(due)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button(action:{
+                                    infoSheet = true
+                                    currentAssignment = assignments[index]
+                                }){
+                                    Text(assignments[index].assignment_description ?? "No description")
+                                        .font(.body)
+                                }
+                                HStack {
+                                    Text("\(assignments[index].assignment_type ?? "?")")
+                                        .foregroundStyle(assignments[index].assignment_type == "Test" ? Color.red : assignments[index].assignment_type == "Exam" ? Color.red : assignments[index].assignment_type == "Quiz" ? Color.yellow : assignments[index].assignment_type == "Homework" ? Color.blue : Color.green )
+                                        .font(.caption)
+                                }
                             }
-                            Text("\(assignment.assignment_type ?? "?")")
-                                .foregroundStyle(assignment.assignment_type == "Test" ? Color.red : assignment.assignment_type == "Exam" ? Color.red : assignment.assignment_type == "Quiz" ? Color.yellow : assignment.assignment_type == "Homework" ? Color.blue : Color.green )
-                                .font(.caption)
-                            Text("\(assignment.completed ?? false ? "Completed" : "Not completed")")
-                                .font(.caption)
-                            
+                            Spacer()
+                            if let due = assignments[index].due_date, !due.isEmpty {
+                                Text("\(due)")
+                            }
                         }
-                    }
-                    Spacer()
-                    VStack {
-                        if assignment.raw_score == "" {
-                            Text("Pending")
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
-                                .foregroundColor(.secondary)
-                            let score = Double(assignment.raw_score ?? "") ?? 0
-                            let max = assignment.maximum_score ?? 0
-                            let percent = score/Double(max)
-                            Text(percent, format: .percent.precision(.fractionLength(2)))
-                                .foregroundColor(.secondary)
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                appInfo.info[assignments[index].score_id] = !(appInfo.info[assignments[index].score_id] ?? false)
+                                appInfo.info = appInfo.info // force SwiftUI to see a change
+                            } label: {
+                                Label(
+                                    (appInfo.info[assignments[index].score_id, default: false] ?? false) ? "Mark Incomplete" : "Mark Complete",
+                                    systemImage: (appInfo.info[assignments[index].score_id, default: false] ?? false) ? "xmark.circle" : "checkmark.circle"
+                                )
+                            }
+                            .tint((appInfo.info[assignments[index].score_id] ?? false) ? .orange : .green)
                         }
                     }
                 }
-                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                    Button {
-                        // Toggle completed locally
-                        var updated = assignments[index]
-                        updated.completed = !(updated.completed ?? false)
-                        assignments[index] = updated
-                    } label: {
-                        Label((assignment.completed ?? false) ? "Mark Incomplete" : "Mark Complete",
-                              systemImage: (assignment.completed ?? false) ? "xmark.circle" : "checkmark.circle")
+            }
+            Section(header: Text("Completed")) {
+                ForEach(assignments.indices, id: \.self) { index in
+                    if appInfo.info[assignments[index].score_id, default: false] == true {
+                        let assignment = assignments[index]
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button(action:{
+                                    infoSheet = true
+                                    currentAssignment = assignment
+                                }){
+                                    Text(assignment.assignment_description ?? "No description")
+                                        .font(.body)
+                                }
+                                HStack {
+                                    Text("\(assignment.assignment_type ?? "?")")
+                                        .foregroundStyle(assignment.assignment_type == "Test" ? Color.red : assignment.assignment_type == "Exam" ? Color.red : assignment.assignment_type == "Quiz" ? Color.yellow : assignment.assignment_type == "Homework" ? Color.blue : Color.green )
+                                        .font(.caption)
+                                    if let due = assignment.due_date, !due.isEmpty {
+                                        Text("\(due)")
+                                    }
+                                }
+                            }
+                            Spacer()
+                            VStack {
+                                if assignment.raw_score == "" {
+                                    Text("Pending")
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
+                                        .foregroundColor(.secondary)
+                                    let score = Double(assignment.raw_score ?? "") ?? 0
+                                    let max = assignment.maximum_score ?? 0
+                                    let percent = score/Double(max)
+                                    Text(percent, format: .percent.precision(.fractionLength(2)))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                appInfo.info[assignment.score_id] = !(appInfo.info[assignment.score_id] ?? false)
+                                appInfo.info = appInfo.info // force SwiftUI to see a change
+                            } label: {
+                                Label(
+                                    (appInfo.info[assignment.score_id, default: false] ?? false) ? "Mark Incomplete" : "Mark Complete",
+                                    systemImage: (appInfo.info[assignment.score_id, default: false] ?? false) ? "xmark.circle" : "checkmark.circle"
+                                )
+                            }
+                            .tint((appInfo.info[assignment.score_id] ?? false) ? .orange : .green)
+                        }
                     }
-                    .tint((assignment.completed ?? false) ? .orange : .green)
                 }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                
+                Text(formatter.string(from: Date()))
+                    .font(.subheadline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
             }
         }
         .navigationTitle("\(course?.class_name ?? "Unknown")")
@@ -286,13 +334,17 @@ struct CourseView: View {
             syncCookies {
                 Task {
                     await loadAssignments(courseID: course.enrollment_pk ?? 0)
+                    
+                    for i in assignments.indices {
+                        if assignments[i].raw_score != "" {
+                            appInfo.info[assignments[i].score_id] = true
+                            appInfo.info = appInfo.info
+                        }
+                    }
+                    formatter.dateFormat = "d"   // "d" = day of month (1–31)
                 }
             }
-            for i in assignments.indices {
-                if assignments[i].raw_score != "" {
-                    assignments[i].completed = true
-                }
-            }
+            
         }
         .sheet(isPresented: $infoSheet) {
             Text("\(currentAssignment?.assignment_description ?? "Unknown")")
@@ -368,7 +420,7 @@ struct CourseView: View {
 struct VeracrossLoginView: UIViewRepresentable {
     let url: URL
     var onLogin: () -> Void
-
+    
     func makeUIView(context: Context) -> WKWebView {
         // Explicitly use the persistent data store to help cookie persistence
         let config = WKWebViewConfiguration()
@@ -379,20 +431,20 @@ struct VeracrossLoginView: UIViewRepresentable {
         webView.load(request)
         return webView
     }
-
+    
     func updateUIView(_ uiView: WKWebView, context: Context) {}
-
+    
     func makeCoordinator() -> Coordinator {
         Coordinator(onLogin: onLogin)
     }
-
+    
     class Coordinator: NSObject, WKNavigationDelegate {
         var onLogin: () -> Void
-
+        
         init(onLogin: @escaping () -> Void) {
             self.onLogin = onLogin
         }
-
+        
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // Detect successful login by URL change
             if webView.url?.absoluteString.contains("/student") == true {
