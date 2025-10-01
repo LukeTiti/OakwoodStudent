@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+    <link rel="icon" type="image/png" href="Images/Icon test.png">
+<head>
+  <script>
+    // Check if user has logged in via index.html
+    if (localStorage.getItem("loggedIn") !== "true") {
+      // ❌ Not logged in → send back to login
+      window.location.href = "index.html";
+    }
+  </script>
+
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Classes - Oakwood Note Collection</title>
+  <meta name="author" content="Carl-Philip Arnold">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to bottom right, #a51b0c, #0842ae);
+      color: white;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    h1 {
+      text-align: center;
+      padding: 20px;
+      margin: 0;
+      font-size: 2.4rem;
+      background-color: rgba(0, 0, 0, 0.3);
+    }
+
+    .main-content {
+  display: flex;
+  flex: 1;
+  justify-content: space-around; /* distributes left and right sides more evenly */
+  align-items: flex-start;
+  padding: 20px 40px; /* adds some horizontal space */
+}
+
+.member-list {
+  flex: 0.65; /* keeps width reasonable */
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* centers content inside the member list */
+  padding: 20px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+    .class-container {
+      flex: 1; /* takes 2/3 of width */
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .logo-container {
+      flex: 0.5; /* takes 1/3 of width */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 10px;
+      background-color: rgba(0, 0, 0, 0.2);
+    }
+
+    .logo-container img {
+      max-width: 80%;
+      max-height: 80%;
+      border-radius: 22px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    .class-card {
+      width: 600px;
+      min-height: 100px;
+      border-radius: 10px;
+      padding: 10px 25px;
+      margin-bottom: 20px;
+      cursor: pointer;
+      transition: 0.3s;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .class-card:hover {
+      transform: translateX(39px);
+      opacity: 0.6;
+      outline-style:dotted;
+    }
+
+    /* Color variations */
+    .color1 { background-color: #3b0046;  }
+    .color2 { background-color: #514501; }
+    .color3 { background-color: #3a035c; }
+    .color4 { background-color: #13045e; }
+    .color5 { background-color: #670303; }
+    .color6 { background-color: #103b01; }
+
+    .class-title {
+      font-size: 1.8rem;
+      margin-bottom: 8px;
+    }
+
+    .class-info {
+      font-size: 1rem;
+      opacity: 0.9;
+    }
+
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+  </style>
+</head>
+<body>
+  <h1><a href="index.html"><b>Return</b>
+  </a>Select a Course</h1>
+
+  <div class="main-content">
+    <div class="class-container">
+  
+
+
+      <a href="Precalculus.html"><div class="class-card color1"><div class="class-title">Precalculus</div><div class="class-info">Room • Teacher: Ms. Gastelum</div></div></a>
+      <a href="Algebra 2.html"><div class="class-card color1"><div class="class-title">Algebra 2</div><div class="class-info">Room • Teacher</div></div></a>
+      <a href="Geometry.html"><div class="class-card color1"><div class="class-title">Geometry</div><div class="class-info">Room • Teacher</div></div></a>
+      <a href="French II.html"><div class="class-card color2"><div class="class-title">French II</div><div class="class-info">Room • Teacher: Mme. de Bree</div></div></a>
+      <a href="French III.html"><div class="class-card color2"><div class="class-title">French III</div><div class="class-info">Room • Teacher: Mme. de Bree</div></div></a>
+      <a href="Spanish II.html"><div class="class-card color2"><div class="class-title">Spanish II</div><div class="class-info">Room • Teacher: Ms. Calvillo</div></div></a>
+      <a href="Spanish III.html"><div class="class-card color2"><div class="class-title">Spanish III</div><div class="class-info">Room • Teacher: Profesora Depanah</div></div></a>
+      <a href="AP Euro.html"><div class="class-card color3"><div class="class-title">AP Euro</div><div class="class-info">Room • Teacher: Dr. Pak</div></div></a>
+      <a href="Theater.html"><div class="class-card color6"><div class="class-title">Theater</div><div class="class-info">Room • Teacher: Mrs. Blanchard</div></div></a>
+      <a href="Calculus.html"><div class="class-card color1"><div class="class-title">Calculus (Unfinished)</div><div class="class-info">Room • Teacher: Hashem</div></div></a>
+      <a href="English II.html"><div class="class-card color4"><div class="class-title">English II (Unfinished)</div><div class="class-info">Room • Teacher: Mrs. Call</div></div></a>
+      <a href="Chemistry.html"><div class="class-card color5"><div class="class-title">Chemistry (Unfinished)</div><div class="class-info">Room • Teacher: Dr. Wilmot</div></div></a>
+      <a href="Studio Art.html"><div class="class-card color6"><div class="class-title">Studio Art (Unfinished)</div><div class="class-info">Room • Teacher: Mr. Hubbard</div></div></a>
+      <a href="Photography.html"><div class="class-card color6"><div class="class-title">Photography (Unfinished)</div><div class="class-info">Room • Teacher: Mr. Willis</div></div></a>
+      <a href="Google test.html"><div class="class-card color6"><div class="class-title">Google Sign in</div><div class="class-info">Room • Teacher: Mr. Willis</div></div></a>
+      <p>https://www.scribd.com/document/880838928/Othello-AnswerBooks?v=0.883#page=13</p>
+    </div>
+
+<!---->
+  <div class="member-list">
+    <h2>Members:</h2>
+    <div class="member">Avani Kumar (AK) <b style="color: gold;">(30)</b></div>
+    <div class="member">Carl-Philip Arnold (CPA) <b style="color: silver;">(14)</b></div>
+    <div class="member">Kevin Joel (KJ) <b style="color: salmon;">(7)</b></div>
+    <div class="member">Luke Titi (LT) <b style="color: pink;">(5)</b></div>
+    <div class="member">Henry Mihelich (HM) <b style="color: pink;">(4)</b></div>
+    <div class="member">Sthanika Rahool (SR) <b style="color: pink;">(2)</b></div>
+    <div class="member">Tanner Ota (TO) <b style="color: teal;">(0)</b></div>
+    <div class="member">Jett Alexander (JA) <b style="color: teal;">(0)</b></div>
+    <div class="member">Saidee Avila (SA) <b style="color: teal;">(0)</b></div>
+    <div class="member">Anayeli Mendoza (AM) <b style="color: teal;">(0)</b></div>
+    <div class="member">Kishan Mistry (KM) <b style="color: teal;">(0)</b></div>
+    <div class="member">TBD <b style="color: teal;">(0)</b></div>
+    <div class="member">TBD <b style="color: teal;">(0)</b></div>
+    <div class="member">TBD <b style="color: teal;">(0)</b></div>
+    <p>Teal = sad</p>
+    <p><b>Please Send More Notes!</b> the whole idea is you upload notes and study with other people's Notes
+      (this is does not mean free notes, to gain access to notes <b style="color: #e9420a;">YOU MUST CONTRIBUTE</b>).   
+      <p>More Links for quizlet:</p>
+  <p>https://quizlet.com/21879316/30-years-war-flash-cards</p>
+  <p>https://quizlet.com/7102010/the-protestant-reformation-flash-cards</p>
+      
+      <!-- Request Section -->
+<div style="background: linear-gradient(to bottom right, #a51b0c, #0842ae);
+ padding:20px; border-radius:10px; max-width:500px; margin:auto;">
+  <h2 style="margin-top:0;">Requests:</h2>
+
+  <!-- Example request -->
+  <div style="background:#333; padding:10px; border-radius:6px; margin-bottom:10px;">
+    <strong>Test A</strong> Subject <em>Day(s) missed:</em>
+  </div>
+
+  <div style="background:#333; padding:10px; border-radius:6px; margin-bottom:10px;">
+    <strong>Another Test</strong> Subject <em>Day(s) missed:</em>
+  </div>
+
+  <div style="background:#333; padding:10px; border-radius:6px; margin-bottom:10px;">
+    <strong>And another</strong> Subject <em>Day(s) missed:</em>
+  </div>
+
+    </div>
+    </div>
+
+    </div>
+
+<script>
+  function parseSpotify(input) {
+    input = input.trim();
+    if (input.startsWith('spotify:')) {
+      const parts = input.split(':');
+      if (parts.length >= 3) return { type: parts[1], id: parts[2] };
+    }
+    try {
+      const u = new URL(input);
+      if (u.hostname.includes('open.spotify.com')) {
+        const seg = u.pathname.split('/').filter(Boolean);
+        if (seg.length >= 2) return { type: seg[0], id: seg[1] };
+      }
+    } catch {}
+    return null;
+  }
+
+  function addSpotify() {
+    const input = document.getElementById('spotifyInput');
+    const parsed = parseSpotify(input.value);
+    if (!parsed) return alert("Not a valid Spotify link");
+
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://open.spotify.com/embed/${parsed.type}/${parsed.id}`;
+    iframe.width = "100%";
+    iframe.height = (parsed.type === "playlist" || parsed.type === "album") ? "352" : "152";
+    iframe.frameBorder = "0";
+    iframe.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
+
+    document.getElementById("spotifyEmbeds").appendChild(iframe);
+    input.value = "";
+  }
+</script>
+
+<style>
+  .spotify-box{margin:8px 0;padding:4px;background:#c51a1a;border-radius:4px;}
+  .spotify-box input{width:60%;padding:7px;}
+  .spotify-box button{padding:6px 10px;margin-left:4px;}
+  .spotify-box iframe{margin-top:10px;border-radius:8px;}
+</style>
+
+
+<script>
+  (function(){
+
+    const embeds = document.querySelectorAll('.study-music-section .spotify-embed');
+    if(embeds.length > 0){
+      const notice = document.getElementById('spotifyNotice');
+      notice.style.display = 'block';
+    }
+  })();
+</script>
+
+</a>
+
+
+ 
+    </div>
+    </body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oakwood Note Collection</title>
+  <meta name="author" content="Carl-Philip Arnold">
+  <link rel="icon" type="image/png" href="Images/Icon test.png">
+
+  <!-- Google Sign-In script -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to bottom right, #a51b0c, #0842ae);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    h1 {
+      font-size: 3rem;
+      margin-bottom: 0.5rem;
+    }
+
+    h3 {
+      font-size: 1.5rem;
+      margin: 0.5rem 0;
+    }
+
+    h4 {
+      font-size: 1.2rem;
+      margin: 0.2rem 0;
+      font-weight: normal;
+    }
+
+    p {
+      font-size: 1.2rem;
+      margin: 0.3rem 0 1rem;
+    }
+
+    #error {
+      margin-top: 1rem;
+      color: #ffcccb;
+      font-weight: bold;
+    }
+
+    /* ✅ Responsive adjustments */
+    @media (max-width: 900px) {
+      h1 { font-size: 2.2rem; }
+      h3 { font-size: 1.3rem; }
+      h4 { font-size: 1rem; }
+      p  { font-size: 1rem; }
+    }
+
+    @media (max-width: 600px) {
+      h1 { font-size: 1.8rem; }
+      h3 { font-size: 1.1rem; }
+      h4 { font-size: 0.9rem; }
+      p  { font-size: 0.9rem; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Oakwood Note Repository <b>ALPHA</b></h1>
+  <p>Under maintenance</p>
+  <h3>10th grade group effort</h3>
+  <h4>(organized by CPA)</h4>
+
+  <!-- Google Sign-In button -->
+  <div id="g_id_onload"
+       data-client_id="661195592928-kalvuruoic5fjka4hes4qndumb9gnve1.apps.googleusercontent.com"
+       data-context="signin"
+       data-ux_mode="popup"
+       data-callback="handleCredentialResponse"
+       data-auto_prompt="false">
+  </div>
+
+  <div class="g_id_signin"
+       data-type="standard"
+       data-shape="rectangular"
+       data-theme="outline"
+       data-text="signin_with"
+       data-size="large">
+  </div>
+
+  <div id="error"></div>
+
+  <script>
+    // ✅ Approved users
+    const approvedEmails = [
+      "carlphilip.arnold@gmail.com",
+      "luketiti40@gmail.com",
+      "jettalexa10@gmail.com",
+      "fortnite.dev26@gmail.com",
+      "sthanika.r329@gmail.com",
+      "Kishan.2010.lol@gmail.com",
+      "Abhinavpraveen365@gmail.com",
+      "henrywilliammihelich@gmail.com",
+      "beycraftkj@gmail.com",
+    ];
+
+    // Decode JWT (Google ID Token)
+    function parseJwt(token) {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+      ).join(''));
+      return JSON.parse(jsonPayload);
+    }
+
+    // Handle Google Sign-In
+    function handleCredentialResponse(response) {
+      const data = parseJwt(response.credential);
+      const userEmail = data.email;
+
+      if (approvedEmails.includes(userEmail)) {
+        // ✅ Save login flag and redirect
+        localStorage.setItem("loggedIn", "true");
+        window.location.href = "classes.html";
+      } else {
+        // ❌ Show error if not approved
+        document.getElementById("error").textContent =
+          "❌ Access denied: " + userEmail + " is not approved.";
+      }
+    }
+  </script>
+</body>
+</html>

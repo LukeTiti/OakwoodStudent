@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+  <meta charset="UTF-8">
+  <title>Google Sign-In Example</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jwt-decode/build/jwt-decode.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 100px;
+    }
+    img {
+      border-radius: 100%;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Google Sign-In setup -->
+  <div id="g_id_onload"
+       data-client_id="http://661195592928-kalvuruoic5fjka4hes4qndumb9gnve1.apps.googleusercontent.com/"
+       data-callback="handleCredentialResponse">
+  </div>
+
+  <!-- The actual Google Sign-In button -->
+  <div class="g_id_signin"
+       data-type="standard"
+       data-shape="rectangular"
+       data-theme="outline"
+       data-text="signin_with"
+       data-size="large">
+  </div>
+
+  <div id="user-info"></div>
+
+  <script>
+    function handleCredentialResponse(response) {
+      // Decode Google ID token
+      const user = jwt_decode(response.credential);
+
+      // Show user info
+      document.getElementById("user-info").innerHTML = `
+        <h2>Welcome, ${user.name} 👋</h2>
+        <p>Email: ${user.email}</p>
+        <img src="${user.picture}" alt="Profile Picture"/>
+      `;
+    }
+  </script>
+</body>
+</html>
