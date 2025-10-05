@@ -26,10 +26,10 @@ struct ContentView: View {
                         }
                     }
             }
-            Tab("Calendar", systemImage: "calendar") {
-                ICSView(string: "https://api.veracross.com/oakwood/subscribe/9E7F7993-EB95-4710-B481-AF2130F54B16.ics?uid=D2AF59EB-A594-4ECF-B72E-93428BD7576B" )
+            Tab("To Do", systemImage: "list.bullet") {
+                ToDoPage()
             }
-            Tab("Vercross", systemImage: "book.fill") {
+            Tab("Grades", systemImage: "book.fill") {
                 VeracrossGradesView()
             }
             Tab("Settings", systemImage: "gear") {

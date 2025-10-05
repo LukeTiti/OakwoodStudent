@@ -37,14 +37,14 @@ struct Assignment: Codable, Identifiable {
     var raw_score: String?
     var maximum_score: Int?
     var due_date: String?
+    var completion_status: String?
 }
 
 // MARK: - Main View
 struct VeracrossGradesView: View {
     @State private var isLoggedIn = false
-    @State private var courses: [Course] = []
     @State private var errorMessage: String?
-    
+    @EnvironmentObject var appInfo: AppInfo
     var body: some View {
         NavigationView {
             if !isLoggedIn {
@@ -70,7 +70,7 @@ struct VeracrossGradesView: View {
                                 .foregroundColor(.red)
                         }
                         
-                        ForEach(courses) { course in
+                        ForEach(appInfo.courses) { course in
                             NavigationLink(destination: CourseView(course: course)) {
                                 HStack {
                                     HStack() {
@@ -104,7 +104,7 @@ struct VeracrossGradesView: View {
                             }
                         }
                     }
-                    .navigationTitle("My Grades")
+                    .navigationTitle("Grades")
                 }
             }
         }
@@ -159,7 +159,7 @@ struct VeracrossGradesView: View {
             do {
                 let decoded = try JSONDecoder().decode(CoursesResponse.self, from: data)
                 await MainActor.run {
-                    self.courses = decoded.courses
+                    self.appInfo.courses = decoded.courses
                     self.errorMessage = nil
                 }
             } catch {
@@ -220,7 +220,12 @@ struct CourseView: View {
     @State var currentAssignment: Assignment?
     @EnvironmentObject var appInfo: AppInfo
     
-    let formatter = DateFormatter()
+    let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d"
+        return f
+    }()
+    
     var body: some View {
         List {
             if let errorMessage = errorMessage {
@@ -236,18 +241,29 @@ struct CourseView: View {
                                     infoSheet = true
                                     currentAssignment = assignments[index]
                                 }){
-                                    Text(assignments[index].assignment_description ?? "No description")
+                                    Text(assignments[index].assignment_description)
                                         .font(.body)
                                 }
                                 HStack {
-                                    Text("\(assignments[index].assignment_type ?? "?")")
-                                        .foregroundStyle(assignments[index].assignment_type == "Test" ? Color.red : assignments[index].assignment_type == "Exam" ? Color.red : assignments[index].assignment_type == "Quiz" ? Color.yellow : assignments[index].assignment_type == "Homework" ? Color.blue : Color.green )
+                                    let type = assignments[index].assignment_type ?? ""
+                                    Text(type.isEmpty ? "?" : type)
+                                        .foregroundStyle(
+                                            type == "Test" || type == "Exam" ? Color.red :
+                                            type == "Quiz" ? Color.yellow :
+                                            type == "Homework" ? Color.blue : Color.green
+                                        )
                                         .font(.caption)
                                 }
                             }
                             Spacer()
-                            if let due = assignments[index].due_date, !due.isEmpty {
-                                Text("\(due)")
+                            VStack {
+                                if let due = assignments[index].due_date, !due.isEmpty {
+                                    Text("\(due)")
+                                }
+                                if (assignments[index].completion_status == "Not Turned In") {
+                                    Text("NTI")
+                                        .foregroundColor(.red)
+                                }
                             }
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -256,11 +272,11 @@ struct CourseView: View {
                                 appInfo.info = appInfo.info // force SwiftUI to see a change
                             } label: {
                                 Label(
-                                    (appInfo.info[assignments[index].score_id, default: false] ?? false) ? "Mark Incomplete" : "Mark Complete",
-                                    systemImage: (appInfo.info[assignments[index].score_id, default: false] ?? false) ? "xmark.circle" : "checkmark.circle"
+                                    appInfo.info[assignments[index].score_id, default: false] ? "Mark Incomplete" : "Mark Complete",
+                                    systemImage: appInfo.info[assignments[index].score_id, default: false] ? "xmark.circle" : "checkmark.circle"
                                 )
                             }
-                            .tint((appInfo.info[assignments[index].score_id] ?? false) ? .orange : .green)
+                            .tint(appInfo.info[assignments[index].score_id, default: false] ? .orange : .green)
                         }
                     }
                 }
@@ -275,31 +291,40 @@ struct CourseView: View {
                                     infoSheet = true
                                     currentAssignment = assignment
                                 }){
-                                    Text(assignment.assignment_description ?? "No description")
+                                    Text(assignment.assignment_description)
                                         .font(.body)
                                 }
                                 HStack {
-                                    Text("\(assignment.assignment_type ?? "?")")
-                                        .foregroundStyle(assignment.assignment_type == "Test" ? Color.red : assignment.assignment_type == "Exam" ? Color.red : assignment.assignment_type == "Quiz" ? Color.yellow : assignment.assignment_type == "Homework" ? Color.blue : Color.green )
+                                    let type = assignment.assignment_type ?? ""
+                                    Text(type.isEmpty ? "?" : type)
+                                        .foregroundStyle(
+                                            type == "Test" || type == "Exam" ? Color.red :
+                                            type == "Quiz" ? Color.yellow :
+                                            type == "Homework" ? Color.blue : Color.green
+                                        )
                                         .font(.caption)
                                     if let due = assignment.due_date, !due.isEmpty {
                                         Text("\(due)")
+                                            .font(.caption)
                                     }
                                 }
                             }
                             Spacer()
                             VStack {
-                                if assignment.raw_score == "" {
-                                    Text("Pending")
-                                        .foregroundColor(.secondary)
+                                if (assignment.completion_status == "Not Turned In") {
+                                    Text("NTI")
+                                        .foregroundColor(.red)
                                 } else {
-                                    Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
-                                        .foregroundColor(.secondary)
-                                    let score = Double(assignment.raw_score ?? "") ?? 0
-                                    let max = assignment.maximum_score ?? 0
-                                    let percent = score/Double(max)
-                                    Text(percent, format: .percent.precision(.fractionLength(2)))
-                                        .foregroundColor(.secondary)
+                                    if (assignment.raw_score ?? "").isEmpty {
+                                        Text("Pending")
+                                            .foregroundColor(.secondary)
+                                    } else {
+                                        Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
+                                        let score = Double(assignment.raw_score ?? "") ?? 0
+                                        let max = assignment.maximum_score ?? 0
+                                        let percent = max > 0 ? score / Double(max) : 0
+                                        Text(percent, format: .percent.precision(.fractionLength(2)))
+                                    }
                                 }
                             }
                         }
@@ -309,11 +334,11 @@ struct CourseView: View {
                                 appInfo.info = appInfo.info // force SwiftUI to see a change
                             } label: {
                                 Label(
-                                    (appInfo.info[assignment.score_id, default: false] ?? false) ? "Mark Incomplete" : "Mark Complete",
-                                    systemImage: (appInfo.info[assignment.score_id, default: false] ?? false) ? "xmark.circle" : "checkmark.circle"
+                                    appInfo.info[assignment.score_id, default: false] ? "Mark Incomplete" : "Mark Complete",
+                                    systemImage: appInfo.info[assignment.score_id, default: false] ? "xmark.circle" : "checkmark.circle"
                                 )
                             }
-                            .tint((appInfo.info[assignment.score_id] ?? false) ? .orange : .green)
+                            .tint(appInfo.info[assignment.score_id, default: false] ? .orange : .green)
                         }
                     }
                 }
@@ -321,11 +346,10 @@ struct CourseView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                
                 Text(formatter.string(from: Date()))
                     .font(.subheadline)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
             }
         }
         .navigationTitle("\(course?.class_name ?? "Unknown")")
@@ -336,18 +360,23 @@ struct CourseView: View {
                     await loadAssignments(courseID: course.enrollment_pk ?? 0)
                     
                     for i in assignments.indices {
-                        if assignments[i].raw_score != "" {
-                            appInfo.info[assignments[i].score_id] = true
+                        if let raw = assignments[i].raw_score, !raw.isEmpty {
+                            await MainActor.run {
+                                appInfo.info[assignments[i].score_id] = true
+                                appInfo.info = appInfo.info
+                            }
+                        }
+                        if assignments[i].completion_status == "Not Turned In" && appInfo.info[assignments[i].score_id] == nil {
+                            appInfo.info[assignments[i].score_id] = false
                             appInfo.info = appInfo.info
                         }
                     }
-                    formatter.dateFormat = "d"   // "d" = day of month (1–31)
                 }
             }
             
         }
         .sheet(isPresented: $infoSheet) {
-            Text("\(currentAssignment?.assignment_description ?? "Unknown")")
+            Text(currentAssignment?.assignment_description ?? "Unknown")
                 .font(.title)
             Text("\(currentAssignment?.assignment_notes ?? "Unknown")")
         }

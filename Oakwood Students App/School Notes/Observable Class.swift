@@ -20,6 +20,7 @@ class AppInfo: ObservableObject {
     @Published var reloadID = UUID()
     @Published var signInSheet = false
     @Published var classes: [ClassS] = []
+    @Published var courses: [Course] = []
     @Published var fetchedGrades: [String] = []
     @Published var info: [Int: Bool] = [:] {
         didSet {
