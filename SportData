@@ -1,0 +1,17 @@
+[
+  {
+    "sport": 1,
+    "home": false,
+    "team": "Girls JV",
+    "opponent": "",
+    "time": "5:00",
+    "completed": false,
+    "scores": [
+      {
+        "set": 1,
+        "teamScore": 25,
+        "oppScore": 10
+      }
+    ]
+  }
+]
