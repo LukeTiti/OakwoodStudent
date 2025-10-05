@@ -1,27 +1,30 @@
 name: Update Games JSON
 
 on:
-  workflow_dispatch:   # Allows manual triggering
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   update-json:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout the Sport-Data-Branch
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          ref: Sport-Data-Branch   # Important: work on your data branch
+          ref: Sport-Data-Branch
 
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
+      # 3. Run the update script
       - name: Run update script
-        run: |
-          python update_games.py
+        run: python update_games.py
 
+      # 4. Commit any changes to SportData.json
       - name: Commit changes
         run: |
           git config --global user.email "bot@example.com"
