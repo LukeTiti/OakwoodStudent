@@ -1,0 +1,31 @@
+name: Update Games JSON
+
+on:
+  workflow_dispatch:   # Allows manual triggering
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: Sport-Data-Branch   # Important: work on your data branch
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run update script
+        run: |
+          python update_games.py
+
+      - name: Commit changes
+        run: |
+          git config --global user.email "bot@example.com"
+          git config --global user.name "Update Bot"
+          git add SportData.json
+          git commit -m "Add/update game via GitHub Action" || echo "No changes"
+          git push
