@@ -2,15 +2,27 @@
   {
     "sport": 1,
     "home": false,
-    "team": "Girls JV",
+    "team": "JV Girls",
     "opponent": "Charter",
     "time": "5:00",
     "completed": false,
+    "setsWon": 2,
+    "setsLost": 1,
     "scores": [
       {
         "set": 1,
         "teamScore": 25,
         "oppScore": 10
+      },
+      {
+        "set": 2,
+        "teamScore": 25,
+        "oppScore": 27
+      },
+      {
+        "set": 3,
+        "teamScore": 25,
+        "oppScore": 5
       }
     ]
   }
