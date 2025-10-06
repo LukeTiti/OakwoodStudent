@@ -7,7 +7,7 @@
     "time": "5:00",
     "date": "Oct 9",
     "completed": true,
-    "active": false;
+    "active": false,
     "setsWon": 2,
     "setsLost": 1,
     "scores": [
@@ -31,7 +31,7 @@
       {
         "author": "Tanner Ota",
         "date": "Oct 5",
-        "content": "Yesterday, the team played well and beat charter in 3",
+        "content": "Yesterday, the team played well and beat charter in 3"
       }
     ]
   },
@@ -60,7 +60,7 @@
     "active": false,
     "setsWon": 0,
     "setsLost": 0,
-    "scores": []
+    "scores": [],
     "articles": []
   }
 ]
