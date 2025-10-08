@@ -30,8 +30,41 @@
     "articles": [
       {
         "author": "Tanner Ota",
+        "title": "Amazing Game",
         "date": "Oct 5",
         "content": "Yesterday, the team played well and beat charter in 3"
+      }
+    ]
+  },
+{
+    "sport": 1,
+    "home": true,
+    "team": "MS Girls 8th Grade",
+    "opponent": "Pac Point",
+    "time": "5:00",
+    "date": "Oct 7",
+    "completed": true,
+    "active": false,
+    "setsWon": 2,
+    "setsLost": 0,
+    "scores": [
+      {
+        "set": 1,
+        "teamScore": 25,
+        "oppScore": 6
+      },
+      {
+        "set": 2,
+        "teamScore": 25,
+        "oppScore": 11
+      }
+    ],
+    "articles": [
+      {
+        "author": "Luke Titi",
+        "title": "Serving Game",
+        "date": "Oct 7",
+        "content": "Today, amazing serving is what won the game for the hawks!"
       }
     ]
   },
