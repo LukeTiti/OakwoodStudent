@@ -14,7 +14,7 @@ struct ContentView: View {
     @EnvironmentObject var appInfo: AppInfo
     var body: some View {
         TabView {
-            Tab("Home", systemImage: "house") {
+            Tab("Inside Scoop", systemImage: "newspaper") {
                 HomeView()
             }
             Tab("Notes", systemImage: "book") {
