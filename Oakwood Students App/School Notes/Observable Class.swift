@@ -9,6 +9,12 @@ import Combine
 import GoogleSignIn
 import WebKit
 
+struct GoogleLoginSnapshot: Codable {
+    var isSignedIn: Bool
+    var userName: String
+    var userEmail: String
+}
+
 class AppInfo: ObservableObject {
     @Published var fetchedString: [String] = []
     @Published var fetchedScoopString: [String] = []
@@ -25,7 +31,7 @@ class AppInfo: ObservableObject {
     @Published var fetchedGrades: [String] = []
     @Published var info: [Int: Bool] = [:] {
         didSet {
-            saveInfo()
+            saveAssignmentInfo()
         }
     }
 
@@ -38,21 +44,52 @@ class AppInfo: ObservableObject {
         didSet { saveCookies() }
     }
 
+    private var cancellables = Set<AnyCancellable>()
+
     init() {
-        loadInfo()
+        loadAssignmentInfo()
         loadCookies()
+        loadGoogleLogin()
+
+        // Observe googleVM published properties and persist snapshot when they change
+        googleVM.$isSignedIn
+            .combineLatest(googleVM.$userName, googleVM.$userEmail)
+            .sink { [weak self] isSignedIn, name, email in
+                self?.saveGoogleLogin(snapshot: GoogleLoginSnapshot(isSignedIn: isSignedIn, userName: name, userEmail: email))
+            }
+            .store(in: &cancellables)
     }
 
-    private func saveInfo() {
+    private func saveAssignmentInfo() {
         if let encoded = try? JSONEncoder().encode(info) {
             UserDefaults.standard.set(encoded, forKey: "assignmentInfo")
         }
     }
 
-    private func loadInfo() {
+    private func loadAssignmentInfo() {
         if let data = UserDefaults.standard.data(forKey: "assignmentInfo"),
            let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
             info = decoded
+        }
+    }
+
+    // MARK: - Google VM persistence
+    private func saveGoogleLogin(snapshot: GoogleLoginSnapshot) {
+        if let data = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(data, forKey: "googleLoginSnapshot")
+        }
+    }
+
+    private func loadGoogleLogin() {
+        guard let data = UserDefaults.standard.data(forKey: "googleLoginSnapshot"),
+              let snap = try? JSONDecoder().decode(GoogleLoginSnapshot.self, from: data) else {
+            return
+        }
+        // Restore into the live VM on the main thread
+        DispatchQueue.main.async {
+            self.googleVM.isSignedIn = snap.isSignedIn
+            self.googleVM.userName = snap.userName
+            self.googleVM.userEmail = snap.userEmail
         }
     }
 

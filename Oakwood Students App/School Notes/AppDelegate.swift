@@ -5,7 +5,6 @@
 //  Created by Luke Titi on 9/10/25.
 //
 
-
 import SwiftUI
 import Combine
 import GoogleSignIn
