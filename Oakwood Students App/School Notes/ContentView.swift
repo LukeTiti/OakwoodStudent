@@ -29,11 +29,11 @@ struct ContentView: View {
             Tab("To Do", systemImage: "list.bullet") {
                 ToDoPage()
             }
-            Tab("Grades", systemImage: "book.fill") {
+            Tab("Grades", systemImage: "list.bullet.rectangle.portrait") {
                 VeracrossGradesView()
             }
-            Tab("Settings", systemImage: "gear") {
-                SettingView()
+            Tab("Sports", systemImage: "trophy.fill") {
+                SportsView()
             }
         }
     }

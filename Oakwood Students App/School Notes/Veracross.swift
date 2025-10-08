@@ -54,6 +54,7 @@ struct VeracrossGradesView: View {
                     onLogin: {
                         syncCookies {
                             Task {
+                                await appInfo.captureCurrentCookies()
                                 await loadGrades()
                             }
                         }
@@ -98,7 +99,10 @@ struct VeracrossGradesView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarLeading) {
                             Button {
-                                Task { await loadGrades() }
+                                Task {
+                                    await loadGrades()
+                                    await appInfo.captureCurrentCookies()
+                                }
                             } label: {
                                 Label("Refresh", systemImage: "arrow.clockwise")
                             }
@@ -109,14 +113,17 @@ struct VeracrossGradesView: View {
             }
         }
         .onAppear {
-            // Minimal silent session check:
-            // Sync cookies from WKWebView's persistent store, then try a quick call.
-            syncCookies {
-                Task {
-                    let ok = await isSessionValid()
-                    if ok {
-                        await MainActor.run { isLoggedIn = true }
-                        await loadGrades()
+            // Restore any persisted cookies into both storages first
+            Task {
+                await appInfo.restorePersistedCookiesIntoStores()
+                // Then sync from WK to shared (keeps them aligned)
+                syncCookies {
+                    Task {
+                        let ok = await isSessionValid()
+                        if ok {
+                            await MainActor.run { isLoggedIn = true }
+                            await loadGrades()
+                        }
                     }
                 }
             }
