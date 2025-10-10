@@ -31,7 +31,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		0668360C2E692ADB00C7F530 /* School Notes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "School Notes.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0668360C2E692ADB00C7F530 /* OW Students.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OW Students.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		0668361B2E692ADD00C7F530 /* School NotesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		066836252E692ADD00C7F530 /* School NotesUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -96,7 +96,7 @@
 		0668360D2E692ADB00C7F530 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				0668360C2E692ADB00C7F530 /* School Notes.app */,
+				0668360C2E692ADB00C7F530 /* OW Students.app */,
 				0668361B2E692ADD00C7F530 /* School NotesTests.xctest */,
 				066836252E692ADD00C7F530 /* School NotesUITests.xctest */,
 			);
@@ -129,7 +129,7 @@
 				06A690B12E723BFE0050E087 /* GoogleSignInSwift */,
 			);
 			productName = "School Notes";
-			productReference = 0668360C2E692ADB00C7F530 /* School Notes.app */;
+			productReference = 0668360C2E692ADB00C7F530 /* OW Students.app */;
 			productType = "com.apple.product-type.application";
 		};
 		0668361A2E692ADD00C7F530 /* School NotesTests */ = {
@@ -419,6 +419,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "School-Notes-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -435,7 +436,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "OW Students";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -464,6 +465,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "School-Notes-Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -480,7 +482,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "OW Students";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

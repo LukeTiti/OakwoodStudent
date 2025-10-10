@@ -28,53 +28,71 @@ struct ToDoPage: View {
             return "Upcoming Assignments"
         }
     }
+    
+    func getDay(offset: Int) -> String {
+        if let day = Calendar.current.date(byAdding: .day, value: offset, to: Date()) {
+            let weekday = day.formatted(.dateTime.weekday(.wide))
+            return "\(weekday)"
+        }
+        return ""
+    }
 
     var body: some View {
-        List {
-            if !errorMessage.isEmpty {
-                Text("⚠️ \(errorMessage)")
-                    .foregroundColor(.red)
-            }
-            Section(header: Text("Today's Assignments")) {
-                ForEach(appInfo.courses) { course in
-                    ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                        if appInfo.info[assignment.score_id, default: false] == false {
-                            if let due = assignment.due_date,
-                               due.contains("\(formatter.string(from: Date()))") {
-                                ShowAssignment(assignment: assignment, courseName: course.class_name)
+        NavigationStack {
+            List {
+                if !errorMessage.isEmpty {
+                    Text("⚠️ \(errorMessage)")
+                        .foregroundColor(.red)
+                }
+                Section(header: Text("Today's Assignments")) {
+                    ForEach(appInfo.courses) { course in
+                        ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                            if appInfo.info[assignment.score_id, default: false] == false {
+                                if let due = assignment.due_date,
+                                   due.contains("\(formatter.string(from: Date()))") {
+                                    NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                        ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Section(header: Text("Tomorrow's Assignments")) {
+                    ForEach(appInfo.courses) { course in
+                        ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                            if appInfo.info[assignment.score_id, default: false] == false {
+                                if let due = assignment.due_date,
+                                   let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()),
+                                   due.contains("\(formatter.string(from: tomorrow))") {
+                                    NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                        ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ForEach(2...10, id: \.self) { i in
+                    Section(header: Text(getDay(offset: i))) {
+                        ForEach(appInfo.courses) { course in
+                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                                if appInfo.info[assignment.score_id, default: false] == false {
+                                    if let due = assignment.due_date,
+                                       let tomorrow = Calendar.current.date(byAdding: .day, value: i, to: Date()),
+                                       due.contains("\(formatter.string(from: tomorrow))") {
+                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-            Section(header: Text("Tomorrow's Assignments")) {
-                ForEach(appInfo.courses) { course in
-                    ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                        if appInfo.info[assignment.score_id, default: false] == false {
-                            if let due = assignment.due_date,
-                               let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()),
-                               due.contains("\(formatter.string(from: tomorrow))") {
-                                ShowAssignment(assignment: assignment, courseName: course.class_name)
-                            }
-                        }
-                    }
-                }
-            }
-            Section(header: Text(dayAfterTomorrowHeader)) {
-                ForEach(appInfo.courses) { course in
-                    ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                        if appInfo.info[assignment.score_id, default: false] == false {
-                            if let due = assignment.due_date,
-                               let tomorrow = Calendar.current.date(byAdding: .day, value: 2, to: Date()),
-                               due.contains("\(formatter.string(from: tomorrow))") {
-                                ShowAssignment(assignment: assignment, courseName: course.class_name)
-                            }
-                        }
-                    }
-                }
-            }
+            .navigationTitle("To Do")
         }
-        .navigationTitle("To Do")
         .onAppear {
             // Load assignments for each course, then initialize completion info
             let courseIDs = appInfo.courses.compactMap { $0.enrollment_pk }
@@ -170,6 +188,7 @@ struct ShowAssignment: View {
     @State var assignment: Assignment?
     @EnvironmentObject var appInfo: AppInfo
     @State var courseName: String?
+    @State var showGrade: Bool?
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -194,12 +213,24 @@ struct ShowAssignment: View {
             }
             Spacer()
             VStack {
-                if let due = assignment?.due_date, !due.isEmpty {
-                    Text("\(due)")
-                }
-                if (assignment?.completion_status == "Not Turned In") {
-                    Text("NTI")
-                        .foregroundColor(.red)
+                if showGrade ?? false {
+                    if (assignment?.completion_status == "Not Turned In") {
+                        Text("NTI")
+                            .foregroundColor(.red)
+                    } else {
+                        if (assignment?.raw_score ?? "").isEmpty {
+                            Text("Pending")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("\(assignment?.raw_score ?? "") / \(assignment?.maximum_score ?? 0)")
+                            let score = Double(assignment?.raw_score ?? "") ?? 0
+                            let max = assignment?.maximum_score ?? 0
+                            let percent = max > 0 ? score / Double(max) : 0
+                            Text(percent, format: .percent.precision(.fractionLength(2)))
+                        }
+                    }
+                } else {
+                    Text(assignment?.due_date ?? "")
                 }
             }
         }
@@ -218,3 +249,12 @@ struct ShowAssignment: View {
     }
 }
 
+struct assignmentDetailView: View {
+    @State var assignment: Assignment?
+    var body: some View {
+        Text(assignment?.assignment_notes ?? "")
+            .navigationTitle(assignment?.assignment_description ?? "")
+            .navigationSubtitle(assignment?.due_date ?? "")
+            .navigationSubtitle("Grade: \(assignment?.raw_score ?? "") / \(assignment?.maximum_score ?? 0)")
+    }
+}
