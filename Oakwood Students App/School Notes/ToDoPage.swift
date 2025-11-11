@@ -44,29 +44,50 @@ struct ToDoPage: View {
                     Text("⚠️ \(errorMessage)")
                         .foregroundColor(.red)
                 }
-                Section(header: Text("Today's Assignments")) {
+                Section(header: Text("Past Due Assignments")) {
                     ForEach(appInfo.courses) { course in
                         ForEach(course.assignments ?? [], id: \.score_id) { assignment in
                             if appInfo.info[assignment.score_id, default: false] == false {
-                                if let due = assignment.due_date,
-                                   due.contains("\(formatter.string(from: Date()))") {
-                                    NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                        ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                ForEach(1...30, id: \.self) { i in
+                                    if let due = assignment.due_date,
+                                       let tomorrow = Calendar.current.date(byAdding: .day, value: -i, to: Date()),
+                                       due.contains("\(formatter.string(from: tomorrow))") {
+                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                            ShowAssignment(assignment: assignment, courseName: course.class_name, showGrade: false)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                Section(header: Text("Tomorrow's Assignments")) {
-                    ForEach(appInfo.courses) { course in
-                        ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                            if appInfo.info[assignment.score_id, default: false] == false {
-                                if let due = assignment.due_date,
-                                   let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()),
-                                   due.contains("\(formatter.string(from: tomorrow))") {
-                                    NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                        ShowAssignment(assignment: assignment, courseName: course.class_name)
+                if checkDay(day: 0) {
+                    Section(header: Text("Today's Assignments")) {
+                        ForEach(appInfo.courses) { course in
+                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                                if appInfo.info[assignment.score_id, default: false] == false {
+                                    if let due = assignment.due_date,
+                                       due.contains("\(formatter.string(from: Date()))") {
+                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if checkDay(day: 1) {
+                    Section(header: Text("Tomorrow's Assignments")) {
+                        ForEach(appInfo.courses) { course in
+                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                                if appInfo.info[assignment.score_id, default: false] == false {
+                                    if let due = assignment.due_date,
+                                       let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()),
+                                       due.contains("\(formatter.string(from: tomorrow))") {
+                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                        }
                                     }
                                 }
                             }
@@ -74,15 +95,17 @@ struct ToDoPage: View {
                     }
                 }
                 ForEach(2...10, id: \.self) { i in
-                    Section(header: Text(getDay(offset: i))) {
-                        ForEach(appInfo.courses) { course in
-                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                                if appInfo.info[assignment.score_id, default: false] == false {
-                                    if let due = assignment.due_date,
-                                       let tomorrow = Calendar.current.date(byAdding: .day, value: i, to: Date()),
-                                       due.contains("\(formatter.string(from: tomorrow))") {
-                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
+                    if checkDay(day: i) {
+                        Section(header: Text(getDay(offset: i))) {
+                            ForEach(appInfo.courses) { course in
+                                ForEach(course.assignments ?? [], id: \.score_id) { assignment in
+                                    if appInfo.info[assignment.score_id, default: false] == false {
+                                        if let due = assignment.due_date,
+                                           let tomorrow = Calendar.current.date(byAdding: .day, value: i, to: Date()),
+                                           due.contains("\(formatter.string(from: tomorrow))") {
+                                            NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
+                                                ShowAssignment(assignment: assignment, courseName: course.class_name)
+                                            }
                                         }
                                     }
                                 }
@@ -118,6 +141,18 @@ struct ToDoPage: View {
                 }
             }
         }
+    }
+    func checkDay(day: Int) -> Bool {
+        for course in appInfo.courses {
+            for assignment in course.assignments ?? [] {
+                if let due = assignment.due_date,
+                   let targetDate = Calendar.current.date(byAdding: .day, value: day, to: Date()),
+                   due.contains("\(formatter.string(from: targetDate))") {
+                    return true
+                }
+            }
+        }
+        return false
     }
     func loadAssignments(courseID: Int) async {
         guard let url = URL(string: "https://portals-embed.veracross.com/oakwood/student/enrollment/\(courseID)/assignments") else {
@@ -223,10 +258,12 @@ struct ShowAssignment: View {
                                 .foregroundColor(.secondary)
                         } else {
                             Text("\(assignment?.raw_score ?? "") / \(assignment?.maximum_score ?? 0)")
+                                .foregroundStyle(assignment?.is_unread == 1 ? Color.yellow : Color.primary)
                             let score = Double(assignment?.raw_score ?? "") ?? 0
                             let max = assignment?.maximum_score ?? 0
                             let percent = max > 0 ? score / Double(max) : 0
                             Text(percent, format: .percent.precision(.fractionLength(2)))
+                                .foregroundStyle(assignment?.is_unread == 1 ? Color.yellow : Color.primary)
                         }
                     }
                 } else {

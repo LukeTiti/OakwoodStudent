@@ -38,6 +38,7 @@ struct Assignment: Codable, Identifiable {
     var maximum_score: Int?
     var due_date: String?
     var completion_status: String?
+    var is_unread: Int?
 }
 
 // MARK: - Main View
@@ -242,7 +243,7 @@ struct CourseView: View {
                     if appInfo.info[assignments[index].score_id, default: false] == false {
                         let assignment = assignments[index]
                         NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                            ShowAssignment(assignment: assignment, courseName: "", showGrade: true)
+                            ShowAssignment(assignment: assignment, courseName: "", showGrade: false)
                         }
                     }
                 }

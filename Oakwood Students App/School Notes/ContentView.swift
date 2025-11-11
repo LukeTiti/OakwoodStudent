@@ -17,15 +17,15 @@ struct ContentView: View {
             Tab("Inside Scoop", systemImage: "newspaper") {
                 HomeView()
             }
-            Tab("Notes", systemImage: "book") {
-                ClassNotes()
-                    .id(appInfo.reloadID)
-                    .onChange(of: appInfo.googleVM.isSignedIn) { signedIn in
-                        if signedIn {
-                            appInfo.reloadID = UUID()
-                        }
-                    }
-            }
+//            Tab("Notes", systemImage: "book") {
+//                ClassNotes()
+//                    .id(appInfo.reloadID)
+//                    .onChange(of: appInfo.googleVM.isSignedIn) { signedIn in
+//                        if signedIn {
+//                            appInfo.reloadID = UUID()
+//                        }
+//                    }
+//            }
             Tab("To Do", systemImage: "list.bullet") {
                 ToDoPage()
             }

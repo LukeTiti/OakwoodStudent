@@ -192,7 +192,7 @@ struct ArticleView: View {
     @State var article: Article?
     var body: some View {
         ScrollView {
-            Text("\(article?.content ?? "")")
+            Text(.init(article?.content ?? "No Content"))
         }
             .toolbar {
                 ToolbarItem(placement: .principal) {
