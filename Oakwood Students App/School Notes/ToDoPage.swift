@@ -38,6 +38,8 @@ struct ToDoPage: View {
     }
 
     var body: some View {
+        VeracrossGradesView()
+            .frame(width: 1, height: 1)
         NavigationStack {
             List {
                 if !errorMessage.isEmpty {
@@ -118,29 +120,35 @@ struct ToDoPage: View {
         }
         .onAppear {
             // Load assignments for each course, then initialize completion info
-            let courseIDs = appInfo.courses.compactMap { $0.enrollment_pk }
-            for courseID in courseIDs {
-                Task {
-                    await loadAssignments(courseID: courseID)
-                    
-                    // After loading, find assignments for this course safely
-                    let loadedAssignments = self.appInfo.courses.first(where: { $0.enrollment_pk == courseID })?.assignments ?? []
-                    
-                    await MainActor.run {
-                        for assignment in loadedAssignments {
-                            if let raw = assignment.raw_score, !raw.isEmpty {
-                                appInfo.info[assignment.score_id] = true
-                            } else if assignment.completion_status == "Not Turned In",
-                                      appInfo.info[assignment.score_id] == nil {
-                                appInfo.info[assignment.score_id] = false
+            Task {
+                await wait(seconds: 1)
+                let courseIDs = appInfo.courses.compactMap { $0.enrollment_pk }
+                for courseID in courseIDs {
+                    Task {
+                        await loadAssignments(courseID: courseID)
+                        
+                        // After loading, find assignments for this course safely
+                        let loadedAssignments = self.appInfo.courses.first(where: { $0.enrollment_pk == courseID })?.assignments ?? []
+                        
+                        await MainActor.run {
+                            for assignment in loadedAssignments {
+                                if let raw = assignment.raw_score, !raw.isEmpty {
+                                    appInfo.info[assignment.score_id] = true
+                                } else if assignment.completion_status == "Not Turned In",
+                                          appInfo.info[assignment.score_id] == nil {
+                                    appInfo.info[assignment.score_id] = false
+                                }
                             }
+                            // Force SwiftUI to notice the change if needed
+                            appInfo.info = appInfo.info
                         }
-                        // Force SwiftUI to notice the change if needed
-                        appInfo.info = appInfo.info
                     }
-                }
+            }
             }
         }
+    }
+    private func wait(seconds: Double) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
     func checkDay(day: Int) -> Bool {
         for course in appInfo.courses {
