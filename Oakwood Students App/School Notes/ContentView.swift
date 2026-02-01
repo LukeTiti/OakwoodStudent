@@ -35,6 +35,12 @@ struct ContentView: View {
             Tab("Sports", systemImage: "trophy.fill") {
                 SportsView()
             }
+            Tab("Service", systemImage: "heart.fill") {
+                ServiceView()
+            }
+            Tab("Settings", systemImage: "gear") {
+                SettingsView()
+            }
         }
     }
 }

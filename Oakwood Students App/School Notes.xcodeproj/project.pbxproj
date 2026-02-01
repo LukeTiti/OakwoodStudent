@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8262F2DCF1400098F78 /* FirebaseAI */; };
+		0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8282F2DCF1400098F78 /* FirebaseAILogic */; };
+		0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */; };
+		0651E82D2F2DCF1400098F78 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */; };
+		0651E82F2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */; };
+		0651E8352F2E4BEE00098F78 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8342F2E4BEE00098F78 /* FirebaseFirestore */; };
 		066836422E6BB32300C7F530 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 066836412E6BB32300C7F530 /* SwiftSoup */; };
 		0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */ = {isa = PBXBuildFile; productRef = 0668365C2E6BDE4800C7F530 /* iCalendarParser */; };
 		06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690AF2E723BFE0050E087 /* GoogleSignIn */; };
@@ -59,10 +65,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */,
+				0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */,
+				0651E82F2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport in Frameworks */,
+				0651E8352F2E4BEE00098F78 /* FirebaseFirestore in Frameworks */,
+				0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */,
 				066836422E6BB32300C7F530 /* SwiftSoup in Frameworks */,
 				0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */,
 				06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */,
 				06A690B22E723BFE0050E087 /* GoogleSignInSwift in Frameworks */,
+				0651E82D2F2DCF1400098F78 /* FirebaseAnalyticsCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +139,12 @@
 				0668365C2E6BDE4800C7F530 /* iCalendarParser */,
 				06A690AF2E723BFE0050E087 /* GoogleSignIn */,
 				06A690B12E723BFE0050E087 /* GoogleSignInSwift */,
+				0651E8262F2DCF1400098F78 /* FirebaseAI */,
+				0651E8282F2DCF1400098F78 /* FirebaseAILogic */,
+				0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */,
+				0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */,
+				0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */,
+				0651E8342F2E4BEE00098F78 /* FirebaseFirestore */,
 			);
 			productName = "School Notes";
 			productReference = 0668360C2E692ADB00C7F530 /* OW Students.app */;
@@ -214,6 +232,7 @@
 				066836402E6BB32300C7F530 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				0668365B2E6BDE4800C7F530 /* XCRemoteSwiftPackageReference "iCalendarParser" */,
 				06A690AE2E723BFE0050E087 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0668360D2E692ADB00C7F530 /* Products */;
@@ -641,6 +660,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.8.0;
+			};
+		};
 		066836402E6BB32300C7F530 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/scinfu/SwiftSoup";
@@ -668,6 +695,36 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0651E8262F2DCF1400098F78 /* FirebaseAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAI;
+		};
+		0651E8282F2DCF1400098F78 /* FirebaseAILogic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAILogic;
+		};
+		0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
+		};
+		0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsIdentitySupport;
+		};
+		0651E8342F2E4BEE00098F78 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
 		066836412E6BB32300C7F530 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 066836402E6BB32300C7F530 /* XCRemoteSwiftPackageReference "SwiftSoup" */;

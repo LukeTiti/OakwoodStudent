@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Hours - Advisor Portal</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        h1 { margin-bottom: 20px; color: #333; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; background: #ddd; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .tab.active { background: #007AFF; color: white; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .form-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+        .student-name { font-size: 16px; font-weight: 500; color: #555; }
+        .hours { font-size: 24px; font-weight: 700; color: #007AFF; }
+        .date { color: #888; font-size: 14px; }
+        .section { margin-top: 15px; }
+        .section-title { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+        .reflection { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; }
+        .entry { padding: 8px 0; border-bottom: 1px solid #eee; }
+        .entry:last-child { border-bottom: none; }
+        .entry-notes { font-weight: 500; }
+        .entry-details { font-size: 13px; color: #666; }
+        .buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        .btn-approve { background: #34C759; color: white; }
+        .btn-reject { background: #FF3B30; color: white; }
+        .btn:hover { opacity: 0.9; }
+        .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-pending { background: #FF9500; color: white; }
+        .status-approved { background: #34C759; color: white; }
+        .status-rejected { background: #FF3B30; color: white; }
+        .empty { text-align: center; padding: 40px; color: #888; }
+        .tax-id { background: #e8f4fd; padding: 8px 12px; border-radius: 6px; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Service Hours Approval</h1>
+
+    <div class="tabs">
+        <button class="tab active" onclick="filterByStatus('pending')">Pending</button>
+        <button class="tab" onclick="filterByStatus('approved')">Approved</button>
+        <button class="tab" onclick="filterByStatus('rejected')">Rejected</button>
+        <button class="tab" onclick="filterByStatus('all')">All</button>
+    </div>
+
+    <div id="forms-container">
+        <div class="empty">Loading...</div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getFirestore, collection, query, orderBy, onSnapshot, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCpw3Mo4A7eoA2heVDhdR1fPFXQkCbcW_E",
+            authDomain: "oakwoodstudents-d9495.firebaseapp.com",
+            projectId: "oakwoodstudents-d9495",
+            storageBucket: "oakwoodstudents-d9495.firebasestorage.app",
+            messagingSenderId: "566131280116",
+            appId: "1:566131280116:web:9a6a9f7765a82771deb6a1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let allForms = [];
+        let currentFilter = 'pending';
+
+        // Listen for real-time updates from Firestore
+        const q = query(collection(db, 'serviceForms'));
+        onSnapshot(q, (snapshot) => {
+            allForms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // Sort by date descending
+            allForms.sort((a, b) => b.submittedAt?.toDate() - a.submittedAt?.toDate());
+            renderForms();
+        });
+
+        // Filter forms by status
+        window.filterByStatus = function(status) {
+            currentFilter = status;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            renderForms();
+        };
+
+        // Approve a form
+        window.approveForm = async function(formId) {
+            if (confirm('Approve this service hours submission?')) {
+                await updateDoc(doc(db, 'serviceForms', formId), { status: 'approved' });
+            }
+        };
+
+        // Reject a form
+        window.rejectForm = async function(formId) {
+            const reason = prompt('Reason for rejection (optional):');
+            if (reason !== null) {
+                await updateDoc(doc(db, 'serviceForms', formId), { status: 'rejected', rejectionReason: reason });
+            }
+        };
+
+        // Render forms to the page
+        function renderForms() {
+            const container = document.getElementById('forms-container');
+            let filtered = allForms;
+
+            if (currentFilter !== 'all') {
+                filtered = allForms.filter(f => f.status === currentFilter);
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty">No forms found</div>';
+                return;
+            }
+
+            container.innerHTML = filtered.map(form => `
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="form-title">${form.title || 'Untitled'}</div>
+                            <div class="student-name">${form.studentName || 'Unknown Student'}</div>
+                            <div class="date">${form.submittedAt?.toDate().toLocaleDateString() || 'No date'}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div class="hours">${form.totalHours || 0} hrs</div>
+                            <span class="status-badge status-${form.status}">${form.status}</span>
+                        </div>
+                    </div>
+
+                    ${form.taxID ? `<div class="tax-id"><strong>Tax ID:</strong> ${form.taxID}</div>` : ''}
+
+                    <div class="section">
+                        <div class="section-title">Reflections</div>
+                        ${form.reflection1 ? `<div class="reflection"><strong>1.</strong> ${form.reflection1}</div>` : ''}
+                        ${form.reflection2 ? `<div class="reflection"><strong>2.</strong> ${form.reflection2}</div>` : ''}
+                        ${form.reflection3 ? `<div class="reflection"><strong>3.</strong> ${form.reflection3}</div>` : ''}
+                    </div>
+
+                    <div class="section">
+                        <div class="section-title">Service Entries (${form.services?.length || 0})</div>
+                        ${(form.services || []).map(s => `
+                            <div class="entry">
+                                <div class="entry-notes">${s.notes}</div>
+                                <div class="entry-details">${s.date} • ${s.description} • ${s.hours} hrs</div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    ${form.status === 'pending' ? `
+                        <div class="buttons">
+                            <button class="btn btn-approve" onclick="approveForm('${form.id}')">Approve</button>
+                            <button class="btn btn-reject" onclick="rejectForm('${form.id}')">Reject</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>

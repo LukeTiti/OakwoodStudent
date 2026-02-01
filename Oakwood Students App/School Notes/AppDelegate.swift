@@ -8,9 +8,16 @@
 import SwiftUI
 import Combine
 import GoogleSignIn
+import FirebaseCore
 
-// MARK: - AppDelegate for Google Sign-In URL handling
+// MARK: - AppDelegate for Firebase and Google Sign-In
 class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        return true
+    }
+
     func application(
         _ app: UIApplication,
         open url: URL,
