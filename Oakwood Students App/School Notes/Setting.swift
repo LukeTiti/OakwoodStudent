@@ -10,10 +10,31 @@ import SwiftUI
 // MARK: - SettingsView (Account settings and sign-in)
 struct SettingsView: View {
     @EnvironmentObject var appInfo: AppInfo
+    @AppStorage("gradeNotificationsEnabled") private var gradeNotificationsEnabled = true
 
     var body: some View {
         NavigationStack {
             List {
+                // Notifications Section
+                Section {
+                    Toggle(isOn: $gradeNotificationsEnabled) {
+                        HStack {
+                            Image(systemName: "bell.badge")
+                                .foregroundColor(.red)
+                            Text("Grade Notifications")
+                        }
+                    }
+                    .onChange(of: gradeNotificationsEnabled) { _, enabled in
+                        if enabled {
+                            GradeNotificationService.shared.requestNotificationPermission()
+                        }
+                    }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Get notified when your grades change. Requires logging into Grades tab first.")
+                }
+
                 // Account Section
                 Section("Account") {
                     if appInfo.googleVM.isSignedIn {

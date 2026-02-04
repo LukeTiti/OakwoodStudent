@@ -9,13 +9,37 @@ import SwiftUI
 import Combine
 import GoogleSignIn
 import FirebaseCore
+import BackgroundTasks
+import UserNotifications
 
-// MARK: - AppDelegate for Firebase and Google Sign-In
-class AppDelegate: NSObject, UIApplicationDelegate {
+// MARK: - AppDelegate for Firebase, Google Sign-In, and Background Tasks
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
+
+        // Set notification delegate to show alerts while app is open
+        UNUserNotificationCenter.current().delegate = self
+
+        // Request notification permission
+        GradeNotificationService.shared.requestNotificationPermission()
+
+        // Register background task
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: GradeNotificationService.backgroundTaskIdentifier,
+            using: nil
+        ) { task in
+            self.handleBackgroundRefresh(task: task as! BGAppRefreshTask)
+        }
+
         return true
+    }
+
+    // Show notifications even when app is in foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     func application(
@@ -24,6 +48,22 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         options: [UIApplication.OpenURLOptionsKey : Any] = [:]
     ) -> Bool {
         return GIDSignIn.sharedInstance.handle(url)
+    }
+
+    // Handle background refresh task
+    private func handleBackgroundRefresh(task: BGAppRefreshTask) {
+        // We need appInfo for cookies - create a temporary instance or use shared
+        // For now, just check grades without full appInfo context
+        task.expirationHandler = {
+            task.setTaskCompleted(success: false)
+        }
+
+        Task {
+            await GradeNotificationService.shared.checkForNewGradesBackground()
+            task.setTaskCompleted(success: true)
+            // Schedule next refresh
+            GradeNotificationService.shared.scheduleBackgroundRefresh()
+        }
     }
 }
 
