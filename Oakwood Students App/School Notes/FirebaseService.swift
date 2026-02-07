@@ -122,3 +122,237 @@ struct SubmittedForm: Identifiable {
     var taxID: String
     var services: [LocalService]
 }
+
+// MARK: - Game Score
+struct GameScore: Identifiable {
+    var id: String
+    var eventId: String
+    var homeScore: Int
+    var awayScore: Int
+    var submittedBy: String
+    var submittedByName: String
+    var submittedAt: Date
+}
+
+// MARK: - Scoreboard Signup
+struct ScoreboardSignup: Identifiable {
+    var id: String
+    var eventId: String
+    var job: String
+    var slot: Int  // For jobs with multiple slots (e.g., line judge 1, line judge 2)
+    var userEmail: String
+    var userName: String
+    var signedUpAt: Date
+    var serviceHoursClaimed: Bool
+    var eventDate: Date?
+    var eventDescription: String?  // e.g., "Basketball - Boys Varsity vs Notre Dame"
+}
+
+// MARK: - Job Definitions
+struct JobDefinition {
+    let name: String
+    let slots: Int
+}
+
+let basketballJobs: [JobDefinition] = [
+    JobDefinition(name: "Clock", slots: 1),
+    JobDefinition(name: "Scoreboard", slots: 1),
+    JobDefinition(name: "Shot Clock", slots: 1)
+]
+
+let volleyballJobs: [JobDefinition] = [
+    JobDefinition(name: "Line Judge", slots: 2),
+    JobDefinition(name: "Scorebook", slots: 1),
+    JobDefinition(name: "Scoreboard", slots: 1)
+]
+
+func jobsForSport(_ sport: String) -> [JobDefinition] {
+    switch sport.lowercased() {
+    case "basketball": return basketballJobs
+    case "volleyball": return volleyballJobs
+    default: return []
+    }
+}
+
+// MARK: - FirebaseService Sports Extensions
+extension FirebaseService {
+
+    // MARK: - Game Scores
+
+    func submitGameScore(eventId: String, homeScore: Int, awayScore: Int, userEmail: String, userName: String) async throws {
+        // Check if score already exists for this event
+        let existing = try await db.collection("gameScores")
+            .whereField("eventId", isEqualTo: eventId)
+            .getDocuments()
+
+        if let existingDoc = existing.documents.first {
+            // Update existing score
+            try await db.collection("gameScores").document(existingDoc.documentID).updateData([
+                "homeScore": homeScore,
+                "awayScore": awayScore,
+                "submittedBy": userEmail,
+                "submittedByName": userName,
+                "submittedAt": Timestamp(date: Date())
+            ])
+        } else {
+            // Create new score
+            let data: [String: Any] = [
+                "eventId": eventId,
+                "homeScore": homeScore,
+                "awayScore": awayScore,
+                "submittedBy": userEmail,
+                "submittedByName": userName,
+                "submittedAt": Timestamp(date: Date())
+            ]
+            try await db.collection("gameScores").addDocument(data: data)
+        }
+    }
+
+    func fetchGameScore(eventId: String) async throws -> GameScore? {
+        let snapshot = try await db.collection("gameScores")
+            .whereField("eventId", isEqualTo: eventId)
+            .getDocuments()
+
+        guard let doc = snapshot.documents.first else { return nil }
+        let data = doc.data()
+
+        return GameScore(
+            id: doc.documentID,
+            eventId: data["eventId"] as? String ?? "",
+            homeScore: data["homeScore"] as? Int ?? 0,
+            awayScore: data["awayScore"] as? Int ?? 0,
+            submittedBy: data["submittedBy"] as? String ?? "",
+            submittedByName: data["submittedByName"] as? String ?? "",
+            submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date()
+        )
+    }
+
+    func fetchAllGameScores() async throws -> [String: GameScore] {
+        let snapshot = try await db.collection("gameScores").getDocuments()
+
+        var scores: [String: GameScore] = [:]
+        for doc in snapshot.documents {
+            let data = doc.data()
+            let eventId = data["eventId"] as? String ?? ""
+            scores[eventId] = GameScore(
+                id: doc.documentID,
+                eventId: eventId,
+                homeScore: data["homeScore"] as? Int ?? 0,
+                awayScore: data["awayScore"] as? Int ?? 0,
+                submittedBy: data["submittedBy"] as? String ?? "",
+                submittedByName: data["submittedByName"] as? String ?? "",
+                submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date()
+            )
+        }
+        return scores
+    }
+
+    // MARK: - Scoreboard Signups
+
+    func signUpForJob(eventId: String, job: String, slot: Int, userEmail: String, userName: String, eventDate: Date, eventDescription: String) async throws {
+        // Check if slot is already taken
+        let existing = try await db.collection("scoreboardSignups")
+            .whereField("eventId", isEqualTo: eventId)
+            .whereField("job", isEqualTo: job)
+            .whereField("slot", isEqualTo: slot)
+            .getDocuments()
+
+        if !existing.documents.isEmpty {
+            throw NSError(domain: "FirebaseService", code: 1, userInfo: [NSLocalizedDescriptionKey: "This slot is already taken"])
+        }
+
+        let data: [String: Any] = [
+            "eventId": eventId,
+            "job": job,
+            "slot": slot,
+            "userEmail": userEmail,
+            "userName": userName,
+            "signedUpAt": Timestamp(date: Date()),
+            "serviceHoursClaimed": false,
+            "eventDate": Timestamp(date: eventDate),
+            "eventDescription": eventDescription
+        ]
+        try await db.collection("scoreboardSignups").addDocument(data: data)
+    }
+
+    func claimServiceHours(signupId: String) async throws {
+        try await db.collection("scoreboardSignups").document(signupId).updateData([
+            "serviceHoursClaimed": true
+        ])
+    }
+
+    func fetchUnclaimedPastSignups(userEmail: String) async throws -> [ScoreboardSignup] {
+        let snapshot = try await db.collection("scoreboardSignups")
+            .whereField("userEmail", isEqualTo: userEmail)
+            .whereField("serviceHoursClaimed", isEqualTo: false)
+            .getDocuments()
+
+        let now = Date()
+        return snapshot.documents.compactMap { doc -> ScoreboardSignup? in
+            let data = doc.data()
+            guard let eventDate = (data["eventDate"] as? Timestamp)?.dateValue(),
+                  eventDate < now else { return nil }
+
+            return ScoreboardSignup(
+                id: doc.documentID,
+                eventId: data["eventId"] as? String ?? "",
+                job: data["job"] as? String ?? "",
+                slot: data["slot"] as? Int ?? 0,
+                userEmail: data["userEmail"] as? String ?? "",
+                userName: data["userName"] as? String ?? "",
+                signedUpAt: (data["signedUpAt"] as? Timestamp)?.dateValue() ?? Date(),
+                serviceHoursClaimed: data["serviceHoursClaimed"] as? Bool ?? false,
+                eventDate: eventDate,
+                eventDescription: data["eventDescription"] as? String ?? ""
+            )
+        }
+    }
+
+    func cancelSignup(signupId: String) async throws {
+        try await db.collection("scoreboardSignups").document(signupId).delete()
+    }
+
+    func fetchSignups(eventId: String) async throws -> [ScoreboardSignup] {
+        let snapshot = try await db.collection("scoreboardSignups")
+            .whereField("eventId", isEqualTo: eventId)
+            .getDocuments()
+
+        return snapshot.documents.map { doc in
+            let data = doc.data()
+            return ScoreboardSignup(
+                id: doc.documentID,
+                eventId: data["eventId"] as? String ?? "",
+                job: data["job"] as? String ?? "",
+                slot: data["slot"] as? Int ?? 0,
+                userEmail: data["userEmail"] as? String ?? "",
+                userName: data["userName"] as? String ?? "",
+                signedUpAt: (data["signedUpAt"] as? Timestamp)?.dateValue() ?? Date(),
+                serviceHoursClaimed: data["serviceHoursClaimed"] as? Bool ?? false,
+                eventDate: (data["eventDate"] as? Timestamp)?.dateValue(),
+                eventDescription: data["eventDescription"] as? String
+            )
+        }
+    }
+
+    func fetchMySignups(userEmail: String) async throws -> [ScoreboardSignup] {
+        let snapshot = try await db.collection("scoreboardSignups")
+            .whereField("userEmail", isEqualTo: userEmail)
+            .getDocuments()
+
+        return snapshot.documents.map { doc in
+            let data = doc.data()
+            return ScoreboardSignup(
+                id: doc.documentID,
+                eventId: data["eventId"] as? String ?? "",
+                job: data["job"] as? String ?? "",
+                slot: data["slot"] as? Int ?? 0,
+                userEmail: data["userEmail"] as? String ?? "",
+                userName: data["userName"] as? String ?? "",
+                signedUpAt: (data["signedUpAt"] as? Timestamp)?.dateValue() ?? Date(),
+                serviceHoursClaimed: data["serviceHoursClaimed"] as? Bool ?? false,
+                eventDate: (data["eventDate"] as? Timestamp)?.dateValue(),
+                eventDescription: data["eventDescription"] as? String
+            )
+        }
+    }
+}

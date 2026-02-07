@@ -15,6 +15,7 @@ struct ServiceView: View {
     @State var servicesByYear: [String: [Service]] = [:]
     @State var toSubmit: [LocalService] = []
     @State var submittedForms: [SubmittedForm] = []
+    @State var unclaimedSignups: [ScoreboardSignup] = []
     @State var totalHours: Double = 0
     @State var showPDF = false
     @State var showAddSheet = false
@@ -24,12 +25,49 @@ struct ServiceView: View {
 
     let pdfURL = URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/39950.pdf")!
     let htmlURL = URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/39950.html")!
+    let scoreboardHours: Double = 2.0  // Hours credited per scoreboard job
 
     var sortedYears: [String] { servicesByYear.keys.sorted().reversed() }
     var selectedTotalHours: Double { toSubmit.filter { selectedIDs.contains($0.id) }.reduce(0) { $0 + $1.hours } }
 
     var body: some View {
         List {
+                // Unclaimed Scoreboard Signups Section
+                if !unclaimedSignups.isEmpty {
+                    Section {
+                        ForEach(unclaimedSignups) { signup in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(signup.job)
+                                        .fontWeight(.medium)
+                                    Text(signup.eventDescription ?? "Scoreboard")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    if let date = signup.eventDate {
+                                        Text(date, style: .date)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text("\(scoreboardHours, specifier: "%.1f") hrs")
+                                    .foregroundColor(.secondary)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button("Add") {
+                                    claimSignupHours(signup)
+                                }
+                                .tint(.green)
+                            }
+                        }
+                    } header: {
+                        Text("Scoreboard Hours to Claim")
+                    } footer: {
+                        Text("Swipe left to add to your service hours")
+                            .font(.caption)
+                    }
+                }
+
                 // To Submit Section
                 if !toSubmit.isEmpty {
                     Section {
@@ -127,6 +165,7 @@ struct ServiceView: View {
                 Task {
                     await loadServiceHours()
                     await fetchSubmittedForms()
+                    await fetchUnclaimedSignups()
                 }
             }
             .toolbar {
@@ -197,6 +236,46 @@ struct ServiceView: View {
     func loadLocalData() {
         if let data = UserDefaults.standard.data(forKey: "serviceToSubmit"),
            let decoded = try? JSONDecoder().decode([LocalService].self, from: data) { toSubmit = decoded }
+    }
+
+    func fetchUnclaimedSignups() async {
+        let userEmail = appInfo.googleVM.userEmail
+        guard !userEmail.isEmpty else { return }
+
+        do {
+            let signups = try await FirebaseService.shared.fetchUnclaimedPastSignups(userEmail: userEmail)
+            await MainActor.run { unclaimedSignups = signups }
+        } catch {
+            print("Failed to fetch unclaimed signups: \(error)")
+        }
+    }
+
+    func claimSignupHours(_ signup: ScoreboardSignup) {
+        // Create LocalService entry
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yyyy"
+        let dateString = signup.eventDate.map { formatter.string(from: $0) } ?? formatter.string(from: Date())
+
+        let notes = "\(signup.job) - \(signup.eventDescription ?? "Scoreboard")"
+        let newService = LocalService(
+            date: dateString,
+            description: "Oakwood Service",
+            notes: notes,
+            hours: scoreboardHours
+        )
+
+        toSubmit.append(newService)
+        saveLocalData()
+
+        // Mark as claimed in Firebase
+        Task {
+            do {
+                try await FirebaseService.shared.claimServiceHours(signupId: signup.id)
+                await fetchUnclaimedSignups()
+            } catch {
+                print("Failed to mark signup as claimed: \(error)")
+            }
+        }
     }
 }
 
