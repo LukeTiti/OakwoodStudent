@@ -163,6 +163,7 @@ struct ShowAssignment: View {
 
 struct AssignmentDetailView: View {
     let assignment: Assignment
+    @EnvironmentObject var appInfo: AppInfo
 
     var body: some View {
         List {
@@ -219,5 +220,10 @@ struct AssignmentDetailView: View {
         }
         .navigationTitle(assignment.assignment_description)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if assignment.is_unread == 1 {
+                Task { await appInfo.markAssignmentAsRead(scoreID: assignment.score_id) }
+            }
+        }
     }
 }

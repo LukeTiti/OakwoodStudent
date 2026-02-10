@@ -8,6 +8,7 @@ import SwiftUI
 import Combine
 import GoogleSignIn
 import WebKit
+import SwiftSoup
 
 struct GoogleLoginSnapshot: Codable {
     var isSignedIn: Bool
@@ -260,6 +261,68 @@ class AppInfo: ObservableObject {
             }
         }
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    // MARK: - Mark Assignment as Read
+
+    /// Fetches a Veracross HTML page and extracts the CSRF token from the meta tag.
+    func fetchCSRFToken() async -> String? {
+        guard let url = URL(string: "https://portals.veracross.com/oakwood/student") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = true
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            let doc = try SwiftSoup.parse(html)
+            return try doc.select("meta[name=csrf-token]").first()?.attr("content")
+        } catch {
+            return nil
+        }
+    }
+
+    /// Posts to Veracross to mark an assignment as read, then updates local state.
+    func markAssignmentAsRead(scoreID: Int) async -> String? {
+        guard let token = await fetchCSRFToken() else {
+            return "Could not fetch CSRF token"
+        }
+
+        guard let url = URL(string: "https://portals-embed.veracross.com/oakwood/enrollment/mark_notification_read") else {
+            return "Invalid URL"
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = true
+        request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        request.setValue(token, forHTTPHeaderField: "X-CSRF-Token")
+        request.httpBody = "class_assignment_person_pk=\(scoreID)".data(using: .utf8)
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard status == 200 else {
+                return "Mark as read failed with status \(status)"
+            }
+
+            await MainActor.run {
+                for i in courses.indices {
+                    if let assignments = courses[i].assignments {
+                        for j in assignments.indices {
+                            if courses[i].assignments![j].score_id == scoreID {
+                                courses[i].assignments![j].is_unread = 0
+                            }
+                        }
+                    }
+                }
+            }
+            return nil
+        } catch {
+            return "Network error: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Cookies: Export from storages into persistedCookies

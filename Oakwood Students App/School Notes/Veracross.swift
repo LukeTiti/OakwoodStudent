@@ -128,11 +128,19 @@ struct VeracrossGradesView: View {
                                 .foregroundColor(.red)
                         }
                         ForEach(appInfo.courses) { course in
+                            let unreadCount = (course.assignments ?? []).filter { $0.is_unread == 1 }.count
                             NavigationLink(destination: CourseView(course: course)) {
                                 HStack {
-                                    Text(course.class_name)
-                                        .font(.headline)
-                                        .lineLimit(2)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(course.class_name)
+                                            .font(.headline)
+                                            .lineLimit(2)
+                                        if unreadCount > 0 {
+                                            Text("\(unreadCount) unread assignment\(unreadCount == 1 ? "" : "s")")
+                                                .font(.caption)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 2) {
                                         if let letter = course.ptd_letter_grade {
@@ -188,6 +196,9 @@ struct VeracrossGradesView: View {
             } else {
                 errorMessage = nil
             }
+        }
+        if err == nil {
+            await appInfo.loadAllAssignments()
         }
     }
 }
