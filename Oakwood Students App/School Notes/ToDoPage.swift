@@ -56,7 +56,7 @@ struct ToDoPage: View {
                 if !pastDueAssignments.isEmpty {
                     Section(header: Text("Past Due Assignments")) {
                         ForEach(pastDueAssignments, id: \.assignment.score_id) { item in
-                            NavigationLink(destination: AssignmentDetailView(assignment: item.assignment)) {
+                            NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
                                 ShowAssignment(assignment: item.assignment, courseName: item.courseName)
                             }
                         }
@@ -67,7 +67,7 @@ struct ToDoPage: View {
                     if !items.isEmpty {
                         Section(header: Text(sectionHeader(for: dayOffset))) {
                             ForEach(items, id: \.assignment.score_id) { item in
-                                NavigationLink(destination: AssignmentDetailView(assignment: item.assignment)) {
+                                NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
                                     ShowAssignment(assignment: item.assignment, courseName: item.courseName)
                                 }
                             }
@@ -163,7 +163,9 @@ struct ShowAssignment: View {
 
 struct AssignmentDetailView: View {
     let assignment: Assignment
+    var courseName: String = ""
     @EnvironmentObject var appInfo: AppInfo
+    @State private var shareImage: IdentifiableImage?
 
     var body: some View {
         List {
@@ -224,6 +226,22 @@ struct AssignmentDetailView: View {
             if assignment.is_unread == 1 {
                 Task { await appInfo.markAssignmentAsRead(scoreID: assignment.score_id) }
             }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    let renderer = ImageRenderer(content: GradeShareCard(assignment: assignment, courseName: courseName))
+                    renderer.scale = 3
+                    if let image = renderer.uiImage {
+                        shareImage = IdentifiableImage(image: image)
+                    }
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
+        .sheet(item: $shareImage) { item in
+            ShareSheet(items: [item.image])
         }
     }
 }

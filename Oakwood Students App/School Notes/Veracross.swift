@@ -239,7 +239,7 @@ struct CourseView: View {
 
             Section(header: Text("To Do (\(todoCount))")) {
                 ForEach(assignments.filter { appInfo.info[$0.score_id, default: false] == false }, id: \.score_id) { assignment in
-                    NavigationLink(destination: AssignmentDetailView(assignment: assignment)) {
+                    NavigationLink(destination: AssignmentDetailView(assignment: assignment, courseName: course?.class_name ?? "")) {
                         ShowAssignment(assignment: assignment)
                     }
                 }
@@ -247,7 +247,7 @@ struct CourseView: View {
 
             Section(header: Text("Completed (\(completedCount))")) {
                 ForEach(assignments.filter { appInfo.info[$0.score_id, default: false] == true }, id: \.score_id) { assignment in
-                    NavigationLink(destination: AssignmentDetailView(assignment: assignment)) {
+                    NavigationLink(destination: AssignmentDetailView(assignment: assignment, courseName: course?.class_name ?? "")) {
                         ShowAssignment(assignment: assignment, showGrade: true)
                     }
                 }
@@ -484,6 +484,117 @@ struct VeracrossLoginView: UIViewRepresentable {
             }
         }
     }
+}
+
+// MARK: - Grade Share Card
+struct GradeShareCard: View {
+    let assignment: Assignment
+    let courseName: String
+
+    private var hasGrade: Bool {
+        assignment.raw_score != nil && !(assignment.raw_score?.isEmpty ?? true)
+    }
+
+    private var percent: Double {
+        (assignment.gradePercent ?? 0) * 100
+    }
+
+    private var cardColor: Color {
+        hasGrade ? gradeColor(for: String(percent)) : .blue
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Assignment name
+            Text(assignment.assignment_description)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+
+            if hasGrade {
+                // Graded layout: score + percentage
+                VStack(spacing: 4) {
+                    Text("\(assignment.raw_score ?? "--") / \(assignment.maximum_score ?? 0)")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(String(format: "%.1f%%", percent))
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white.opacity(0.9))
+                }
+
+                Text(courseName)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+            } else {
+                // Reminder layout: big due date + notes preview
+                if let due = assignment.due_date, !due.isEmpty {
+                    Text("Due \(due)")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                Text(courseName)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+
+                if let notes = assignment.assignment_notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.callout)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            // Type badge
+            HStack(spacing: 8) {
+                if let type = assignment.assignment_type, !type.isEmpty {
+                    Text(type)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.white.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundColor(.white.opacity(0.8))
+
+            // Branding
+            Text("Oakwood Students")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .padding(24)
+        .frame(width: 340)
+        .background(
+            LinearGradient(
+                colors: [cardColor.opacity(0.8), cardColor],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+// MARK: - Share Helpers
+struct IdentifiableImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Cookie Sync
