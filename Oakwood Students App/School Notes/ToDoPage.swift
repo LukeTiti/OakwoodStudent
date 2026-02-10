@@ -5,111 +5,70 @@
 //  Created by Luke Titi on 10/1/25.
 //
 import SwiftUI
-import SwiftSoup
-import WebKit
 
 struct ToDoPage: View {
     @State var errorMessage = ""
     @EnvironmentObject var appInfo: AppInfo
-    let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM dd"
-        return f
-    }()
-    @State var infoSheet = false
-    @State var currentAssignment: Assignment? = nil
 
-    // Safely build the header for the "day after tomorrow"
-    private var dayAfterTomorrowHeader: String {
-        if let day2 = Calendar.current.date(byAdding: .day, value: 2, to: Date()) {
-            let weekday = day2.formatted(.dateTime.weekday(.wide))
-            return "\(weekday)'s Assignments"
-        } else {
-            return "Upcoming Assignments"
+    private var incompleteAssignments: [(assignment: Assignment, courseName: String)] {
+        appInfo.courses.flatMap { course in
+            (course.assignments ?? [])
+                .filter { appInfo.info[$0.score_id, default: false] == false }
+                .map { ($0, course.class_name) }
         }
     }
-    
-    func getDay(offset: Int) -> String {
-        if let day = Calendar.current.date(byAdding: .day, value: offset, to: Date()) {
-            let weekday = day.formatted(.dateTime.weekday(.wide))
-            return "\(weekday)"
+
+    private func assignmentsDue(dayOffset: Int) -> [(assignment: Assignment, courseName: String)] {
+        guard let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) else { return [] }
+        return incompleteAssignments.filter { item in
+            guard let dueDate = item.assignment.dueDate else { return false }
+            return Calendar.current.isDate(dueDate, inSameDayAs: targetDate)
         }
-        return ""
+    }
+
+    private var pastDueAssignments: [(assignment: Assignment, courseName: String)] {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return incompleteAssignments.filter { item in
+            guard let dueDate = item.assignment.dueDate else { return false }
+            return dueDate < startOfToday
+        }
+    }
+
+    private func sectionHeader(for dayOffset: Int) -> String {
+        switch dayOffset {
+        case 0: return "Today's Assignments"
+        case 1: return "Tomorrow's Assignments"
+        default:
+            if let day = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) {
+                return day.formatted(.dateTime.weekday(.wide))
+            }
+            return ""
+        }
     }
 
     var body: some View {
-        VeracrossGradesView()
-            .frame(width: 1, height: 1)
         NavigationStack {
             List {
                 if !errorMessage.isEmpty {
                     Text("⚠️ \(errorMessage)")
                         .foregroundColor(.red)
                 }
-                Section(header: Text("Past Due Assignments")) {
-                    ForEach(appInfo.courses) { course in
-                        ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                            if appInfo.info[assignment.score_id, default: false] == false {
-                                ForEach(1...30, id: \.self) { i in
-                                    if let due = assignment.due_date,
-                                       let tomorrow = Calendar.current.date(byAdding: .day, value: -i, to: Date()),
-                                       due.contains("\(formatter.string(from: tomorrow))") {
-                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                            ShowAssignment(assignment: assignment, courseName: course.class_name, showGrade: false)
-                                        }
-                                    }
-                                }
+                if !pastDueAssignments.isEmpty {
+                    Section(header: Text("Past Due Assignments")) {
+                        ForEach(pastDueAssignments, id: \.assignment.score_id) { item in
+                            NavigationLink(destination: AssignmentDetailView(assignment: item.assignment)) {
+                                ShowAssignment(assignment: item.assignment, courseName: item.courseName)
                             }
                         }
                     }
                 }
-                if checkDay(day: 0) {
-                    Section(header: Text("Today's Assignments")) {
-                        ForEach(appInfo.courses) { course in
-                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                                if appInfo.info[assignment.score_id, default: false] == false {
-                                    if let due = assignment.due_date,
-                                       due.contains("\(formatter.string(from: Date()))") {
-                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if checkDay(day: 1) {
-                    Section(header: Text("Tomorrow's Assignments")) {
-                        ForEach(appInfo.courses) { course in
-                            ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                                if appInfo.info[assignment.score_id, default: false] == false {
-                                    if let due = assignment.due_date,
-                                       let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()),
-                                       due.contains("\(formatter.string(from: tomorrow))") {
-                                        NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                            ShowAssignment(assignment: assignment, courseName: course.class_name)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                ForEach(2...10, id: \.self) { i in
-                    if checkDay(day: i) {
-                        Section(header: Text(getDay(offset: i))) {
-                            ForEach(appInfo.courses) { course in
-                                ForEach(course.assignments ?? [], id: \.score_id) { assignment in
-                                    if appInfo.info[assignment.score_id, default: false] == false {
-                                        if let due = assignment.due_date,
-                                           let tomorrow = Calendar.current.date(byAdding: .day, value: i, to: Date()),
-                                           due.contains("\(formatter.string(from: tomorrow))") {
-                                            NavigationLink(destination: assignmentDetailView(assignment: assignment)) {
-                                                ShowAssignment(assignment: assignment, courseName: course.class_name)
-                                            }
-                                        }
-                                    }
+                ForEach(0...10, id: \.self) { dayOffset in
+                    let items = assignmentsDue(dayOffset: dayOffset)
+                    if !items.isEmpty {
+                        Section(header: Text(sectionHeader(for: dayOffset))) {
+                            ForEach(items, id: \.assignment.score_id) { item in
+                                NavigationLink(destination: AssignmentDetailView(assignment: item.assignment)) {
+                                    ShowAssignment(assignment: item.assignment, courseName: item.courseName)
                                 }
                             }
                         }
@@ -119,187 +78,146 @@ struct ToDoPage: View {
             .navigationTitle("To Do")
         }
         .onAppear {
-            // Load assignments for each course, then initialize completion info
             Task {
-                await wait(seconds: 1)
-                let courseIDs = appInfo.courses.compactMap { $0.enrollment_pk }
-                for courseID in courseIDs {
-                    Task {
-                        await loadAssignments(courseID: courseID)
-                        
-                        // After loading, find assignments for this course safely
-                        let loadedAssignments = self.appInfo.courses.first(where: { $0.enrollment_pk == courseID })?.assignments ?? []
-                        
-                        await MainActor.run {
-                            for assignment in loadedAssignments {
-                                if let raw = assignment.raw_score, !raw.isEmpty {
-                                    appInfo.info[assignment.score_id] = true
-                                } else if assignment.completion_status == "Not Turned In",
-                                          appInfo.info[assignment.score_id] == nil {
-                                    appInfo.info[assignment.score_id] = false
-                                }
-                            }
-                            // Force SwiftUI to notice the change if needed
-                            appInfo.info = appInfo.info
-                        }
-                    }
-            }
-            }
-        }
-    }
-    private func wait(seconds: Double) async {
-        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-    }
-    func checkDay(day: Int) -> Bool {
-        for course in appInfo.courses {
-            for assignment in course.assignments ?? [] {
-                if let due = assignment.due_date,
-                   let targetDate = Calendar.current.date(byAdding: .day, value: day, to: Date()),
-                   due.contains("\(formatter.string(from: targetDate))") {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-    func loadAssignments(courseID: Int) async {
-        guard let url = URL(string: "https://portals-embed.veracross.com/oakwood/student/enrollment/\(courseID)/assignments") else {
-            await MainActor.run {
-                errorMessage = "Invalid URL"
-            }
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.httpShouldHandleCookies = true
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            
-            guard status == 200 else {
-                await MainActor.run {
-                    errorMessage = "Server returned status \(status)"
-                }
-                return
-            }
-            
-            // Ensure JSON, not HTML
-            guard isJSONResponse(response, data: data) else {
-                await MainActor.run {
-                    errorMessage = "Not authenticated. Please log in."
-                }
-                return
-            }
-            
-            do {
-                let decoded = try JSONDecoder().decode(AssignmentResponse.self, from: data)
-                await MainActor.run {
-                    if let idx = self.appInfo.courses.firstIndex(where: { $0.enrollment_pk == courseID }) {
-                        self.appInfo.courses[idx].assignments = decoded.assignments
+                await appInfo.restorePersistedCookiesIntoStores()
+                await syncCookies()
+                if appInfo.courses.isEmpty {
+                    if let err = await appInfo.loadCourses() {
+                        errorMessage = err
+                        return
                     }
                 }
-            } catch {
-                let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"
-                await MainActor.run {
-                    errorMessage = "Decoding error: \(error.localizedDescription)\nPreview: \(textPreview.prefix(200))"
+                if let err = await appInfo.loadAllAssignments() {
+                    errorMessage = err
                 }
             }
-        } catch {
-            await MainActor.run {
-                errorMessage = "Network error: \(error.localizedDescription)"
-            }
         }
-    }
-    private func isJSONResponse(_ response: URLResponse?, data: Data) -> Bool {
-        if let http = response as? HTTPURLResponse,
-           let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
-           contentType.contains("application/json") {
-            return true
-        }
-        // Fallback sniffing
-        if let prefix = String(data: data.prefix(1), encoding: .utf8) {
-            return prefix == "{" || prefix == "["
-        }
-        return false
     }
 }
 
 
 struct ShowAssignment: View {
-    @State var assignment: Assignment?
+    let assignment: Assignment
     @EnvironmentObject var appInfo: AppInfo
-    @State var courseName: String?
-    @State var showGrade: Bool?
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(assignment?.assignment_description ?? "")
-                        .font(.body)
-                        .foregroundStyle(Color.primary)
+    var courseName: String = ""
+    var showGrade: Bool = false
 
-                HStack {
-                    let type = assignment?.assignment_type ?? ""
-                    Text(type.isEmpty ? "?" : type)
-                        .foregroundStyle(
-                            type == "Test" || type == "Exam" ? Color.red :
-                                type == "Quiz" ? Color.yellow :
-                                type == "Homework" ? Color.blue : Color.green
-                        )
-                        .font(.caption)
-                }
-                if (courseName?.isEmpty) == false {
-                    Text(courseName ?? "")
-                        .font(.caption)
+    var body: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(assignment.assignment_description)
+                    .font(.body)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    let type = assignment.assignment_type ?? ""
+                    Badge(
+                        text: type.isEmpty ? "Unknown" : type,
+                        color: assignmentTypeColor(type)
+                    )
+                    if !courseName.isEmpty {
+                        Text(courseName)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             Spacer()
-            VStack {
-                if showGrade ?? false {
-                    if (assignment?.completion_status == "Not Turned In") {
+            VStack(alignment: .trailing) {
+                if showGrade {
+                    if assignment.completion_status == "Not Turned In" {
                         Text("NTI")
                             .foregroundColor(.red)
+                    } else if let percent = assignment.gradePercent {
+                        let color: Color = assignment.is_unread == 1 ? .orange : .primary
+                        Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
+                            .foregroundStyle(color)
+                        Text(percent, format: .percent.precision(.fractionLength(2)))
+                            .foregroundStyle(color)
                     } else {
-                        if (assignment?.raw_score ?? "").isEmpty {
-                            Text("Pending")
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("\(assignment?.raw_score ?? "") / \(assignment?.maximum_score ?? 0)")
-                                .foregroundStyle(assignment?.is_unread == 1 ? Color.yellow : Color.primary)
-                            let score = Double(assignment?.raw_score ?? "") ?? 0
-                            let max = assignment?.maximum_score ?? 0
-                            let percent = max > 0 ? score / Double(max) : 0
-                            Text(percent, format: .percent.precision(.fractionLength(2)))
-                                .foregroundStyle(assignment?.is_unread == 1 ? Color.yellow : Color.primary)
-                        }
+                        Text("Pending")
+                            .foregroundColor(.secondary)
                     }
                 } else {
-                    Text(assignment?.due_date ?? "")
+                    Text(assignment.due_date ?? "")
+                        .foregroundColor(.secondary)
                 }
             }
         }
+        .padding(.vertical, 2)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
-                appInfo.info[assignment?.score_id ?? 0] = !(appInfo.info[assignment?.score_id ?? 0] ?? false)
-                appInfo.info = appInfo.info // force SwiftUI to see a change
+                appInfo.toggleInfo(for: assignment.score_id)
             } label: {
+                let done = appInfo.info[assignment.score_id, default: false]
                 Label(
-                    appInfo.info[assignment?.score_id ?? 0, default: false] ? "Mark Incomplete" : "Mark Complete",
-                    systemImage: appInfo.info[assignment?.score_id ?? 0, default: false] ? "xmark.circle" : "checkmark.circle"
+                    done ? "Mark Incomplete" : "Mark Complete",
+                    systemImage: done ? "xmark.circle" : "checkmark.circle"
                 )
             }
-            .tint(appInfo.info[assignment?.score_id ?? 0, default: false] ? .orange : .green)
+            .tint(appInfo.info[assignment.score_id, default: false] ? .orange : .green)
         }
     }
 }
 
-struct assignmentDetailView: View {
-    @State var assignment: Assignment?
+struct AssignmentDetailView: View {
+    let assignment: Assignment
+
     var body: some View {
-        Text(assignment?.assignment_notes ?? "")
-            .navigationTitle(assignment?.assignment_description ?? "")
-            .navigationSubtitle(assignment?.due_date ?? "")
-            .navigationSubtitle("Grade: \(assignment?.raw_score ?? "") / \(assignment?.maximum_score ?? 0)")
+        List {
+            if let raw = assignment.raw_score, !raw.isEmpty, let percent = assignment.gradePercent {
+                Section {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 4) {
+                            Text("\(raw) / \(assignment.maximum_score ?? 0)")
+                                .font(.title)
+                                .fontWeight(.bold)
+                            Text(percent, format: .percent.precision(.fractionLength(1)))
+                                .font(.headline)
+                                .foregroundColor(gradeColor(for: String(percent * 100)))
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            Section("Details") {
+                if let type = assignment.assignment_type, !type.isEmpty {
+                    HStack {
+                        Text("Type")
+                        Spacer()
+                        Badge(text: type, color: assignmentTypeColor(type))
+                    }
+                }
+                if let dueDate = assignment.due_date, !dueDate.isEmpty {
+                    HStack {
+                        Text("Due Date")
+                        Spacer()
+                        Text(dueDate)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                if let status = assignment.completion_status, !status.isEmpty {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(status)
+                            .foregroundColor(status == "Not Turned In" ? .red : .secondary)
+                    }
+                }
+            }
+
+            if let notes = assignment.assignment_notes, !notes.isEmpty {
+                Section("Notes") {
+                    Text(notes)
+                        .font(.body)
+                }
+            }
+        }
+        .navigationTitle(assignment.assignment_description)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

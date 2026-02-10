@@ -137,6 +137,131 @@ class AppInfo: ObservableObject {
         }
     }
 
+    // MARK: - Shared Veracross Helpers
+
+    /// Fetches the course list from Veracross and populates `self.courses`.
+    /// Returns an error string on failure, or nil on success.
+    func loadCourses() async -> String? {
+        guard let url = URL(string: "https://portals.veracross.com/oakwood/student/component/ClassListStudent/1308/load_data") else {
+            return "Invalid URL"
+        }
+
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = true
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+            guard status == 200 else {
+                return "Server returned status \(status)"
+            }
+
+            guard isJSONResponse(response, data: data) else {
+                return "Not authenticated. Please log in."
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(CoursesResponse.self, from: data)
+                await MainActor.run {
+                    self.courses = decoded.courses
+                }
+                return nil
+            } catch {
+                let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"
+                return "Decoding error: \(error.localizedDescription)\nPreview: \(textPreview.prefix(200))"
+            }
+        } catch {
+            return "Network error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Single shared implementation of JSON response detection (was triplicated).
+    func isJSONResponse(_ response: URLResponse?, data: Data) -> Bool {
+        if let http = response as? HTTPURLResponse,
+           let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+           contentType.contains("application/json") {
+            return true
+        }
+        if let prefix = String(data: data.prefix(1), encoding: .utf8) {
+            return prefix == "{" || prefix == "["
+        }
+        return false
+    }
+
+    /// Fetches assignments for a single course and stores them in `self.courses`.
+    /// Returns an error string on failure, or nil on success.
+    func loadAssignments(courseID: Int) async -> String? {
+        guard let url = URL(string: "https://portals-embed.veracross.com/oakwood/student/enrollment/\(courseID)/assignments") else {
+            return "Invalid URL"
+        }
+
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = true
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+            guard status == 200 else {
+                return "Server returned status \(status)"
+            }
+
+            guard isJSONResponse(response, data: data) else {
+                return "Not authenticated. Please log in."
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(AssignmentResponse.self, from: data)
+                await MainActor.run {
+                    if let idx = self.courses.firstIndex(where: { $0.enrollment_pk == courseID }) {
+                        self.courses[idx].assignments = decoded.assignments
+                    }
+                }
+                return nil
+            } catch {
+                let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"
+                return "Decoding error: \(error.localizedDescription)\nPreview: \(textPreview.prefix(200))"
+            }
+        } catch {
+            return "Network error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Initializes completion status for assignments in a given course.
+    /// Marks assignments with a raw_score as complete, and "Not Turned In" as incomplete.
+    func initializeCompletionStatus(forCourseID courseID: Int) {
+        guard let assignments = courses.first(where: { $0.enrollment_pk == courseID })?.assignments else { return }
+        for assignment in assignments {
+            if let raw = assignment.raw_score, !raw.isEmpty {
+                info[assignment.score_id] = true
+            } else if assignment.completion_status == "Not Turned In",
+                      info[assignment.score_id] == nil {
+                info[assignment.score_id] = false
+            }
+        }
+        info = info // force SwiftUI to notice
+    }
+
+    /// Loads assignments for all courses, then initializes completion status.
+    /// Returns a combined error string or nil on full success.
+    func loadAllAssignments() async -> String? {
+        var errors: [String] = []
+        let courseIDs = courses.compactMap { $0.enrollment_pk }
+        for courseID in courseIDs {
+            if let err = await loadAssignments(courseID: courseID) {
+                errors.append(err)
+            } else {
+                await MainActor.run {
+                    initializeCompletionStatus(forCourseID: courseID)
+                }
+            }
+        }
+        return errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
     // MARK: - Cookies: Export from storages into persistedCookies
     func captureCurrentCookies() async {
         let httpStore = HTTPCookieStorage.shared
