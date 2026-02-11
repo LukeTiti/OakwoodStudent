@@ -31,6 +31,7 @@ struct Assignment: Codable, Identifiable {
     var id: String { assignment_description }
 
     var score_id: Int
+    var assignment_id: Int?
     var assignment_type: String?
     var assignment_description: String
     var assignment_notes: String?
@@ -264,6 +265,7 @@ struct CourseView: View {
                     if let err { errorMessage = err }
                     appInfo.initializeCompletionStatus(forCourseID: courseID)
                 }
+                await appInfo.loadResourceAssignmentIds()
             }
         }
     }

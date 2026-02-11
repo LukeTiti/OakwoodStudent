@@ -30,6 +30,7 @@ class AppInfo: ObservableObject {
     @Published var classes: [ClassS] = []
     @Published var courses: [Course] = []
     @Published var fetchedGrades: [String] = []
+    @Published var resourceAssignmentIds: Set<Int> = []
     @Published var info: [Int: Bool] = [:] {
         didSet {
             saveAssignmentInfo()
@@ -322,6 +323,12 @@ class AppInfo: ObservableObject {
             return nil
         } catch {
             return "Network error: \(error.localizedDescription)"
+        }
+    }
+
+    func loadResourceAssignmentIds() async {
+        if let ids = try? await FirebaseService.shared.fetchResourceAssignmentIds() {
+            await MainActor.run { resourceAssignmentIds = ids }
         }
     }
 

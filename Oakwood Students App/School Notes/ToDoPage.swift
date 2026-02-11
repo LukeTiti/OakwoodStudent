@@ -90,6 +90,7 @@ struct ToDoPage: View {
                 if let err = await appInfo.loadAllAssignments() {
                     errorMessage = err
                 }
+                await appInfo.loadResourceAssignmentIds()
             }
         }
     }
@@ -120,6 +121,11 @@ struct ShowAssignment: View {
                         Text(courseName)
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    }
+                    if let id = assignment.assignment_id, appInfo.resourceAssignmentIds.contains(id) {
+                        Image(systemName: "link")
+                            .font(.caption)
+                            .foregroundColor(.blue)
                     }
                 }
             }
@@ -166,6 +172,8 @@ struct AssignmentDetailView: View {
     var courseName: String = ""
     @EnvironmentObject var appInfo: AppInfo
     @State private var shareImage: IdentifiableImage?
+    @State private var resources: [FirebaseService.AssignmentResource] = []
+    @State private var showAddResource = false
 
     var body: some View {
         List {
@@ -219,6 +227,56 @@ struct AssignmentDetailView: View {
                         .font(.body)
                 }
             }
+
+            Section {
+                ForEach(resources) { resource in
+                    Button {
+                        if let url = URL(string: resource.url) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: resourceIcon(for: resource.type))
+                                .foregroundColor(resourceColor(for: resource.type))
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(resource.title)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                Text("Added by \(resource.addedByName)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if resource.addedBy == appInfo.googleVM.userEmail {
+                            Button(role: .destructive) {
+                                Task {
+                                    try? await FirebaseService.shared.deleteResource(documentId: resource.id)
+                                    loadResources()
+                                    await appInfo.loadResourceAssignmentIds()
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    showAddResource = true
+                } label: {
+                    Label("Add Resource", systemImage: "plus.circle")
+                }
+            } header: {
+                Text("Resources")
+            }
         }
         .navigationTitle(assignment.assignment_description)
         .navigationBarTitleDisplayMode(.inline)
@@ -226,6 +284,7 @@ struct AssignmentDetailView: View {
             if assignment.is_unread == 1 {
                 Task { await appInfo.markAssignmentAsRead(scoreID: assignment.score_id) }
             }
+            loadResources()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -242,6 +301,118 @@ struct AssignmentDetailView: View {
         }
         .sheet(item: $shareImage) { item in
             ShareSheet(items: [item.image])
+        }
+        .sheet(isPresented: $showAddResource) {
+            AddResourceSheet(assignmentId: assignment.assignment_id ?? 0, appInfo: appInfo) {
+                loadResources()
+                Task { await appInfo.loadResourceAssignmentIds() }
+            }
+        }
+    }
+
+    private func loadResources() {
+        guard let assignmentId = assignment.assignment_id else { return }
+        Task {
+            if let fetched = try? await FirebaseService.shared.fetchResources(assignmentId: assignmentId) {
+                resources = fetched
+            }
+        }
+    }
+}
+
+// MARK: - Resource Helpers
+func resourceIcon(for type: String) -> String {
+    switch type {
+    case "quizlet": return "rectangle.stack"
+    case "kahoot": return "gamecontroller"
+    case "youtube": return "play.rectangle"
+    default: return "link"
+    }
+}
+
+func resourceColor(for type: String) -> Color {
+    switch type {
+    case "quizlet": return .purple
+    case "kahoot": return .green
+    case "youtube": return .red
+    default: return .blue
+    }
+}
+
+// MARK: - Add Resource Sheet
+struct AddResourceSheet: View {
+    let assignmentId: Int
+    let appInfo: AppInfo
+    var onSubmit: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var url = ""
+    @State private var title = ""
+    @State private var isSubmitting = false
+
+    private var detectedType: String {
+        FirebaseService.detectResourceType(from: url)
+    }
+
+    private var canSubmit: Bool {
+        !url.trimmingCharacters(in: .whitespaces).isEmpty && !isSubmitting
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("URL (required)", text: $url)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    TextField("Title (optional)", text: $title)
+                } footer: {
+                    if !url.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: resourceIcon(for: detectedType))
+                                .foregroundColor(resourceColor(for: detectedType))
+                            Text("Detected: \(detectedType.capitalized)")
+                                .foregroundColor(.secondary)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Add Resource")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        submit()
+                    }
+                    .disabled(!canSubmit)
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        isSubmitting = true
+        let trimmedUrl = url.trimmingCharacters(in: .whitespaces)
+        let resourceTitle = title.trimmingCharacters(in: .whitespaces).isEmpty
+            ? trimmedUrl
+            : title.trimmingCharacters(in: .whitespaces)
+
+        Task {
+            try? await FirebaseService.shared.submitResource(
+                assignmentId: assignmentId,
+                url: trimmedUrl,
+                title: resourceTitle,
+                userEmail: appInfo.googleVM.userEmail,
+                userName: appInfo.googleVM.userName
+            )
+            onSubmit()
+            dismiss()
         }
     }
 }

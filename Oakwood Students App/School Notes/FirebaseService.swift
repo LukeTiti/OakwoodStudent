@@ -355,4 +355,74 @@ extension FirebaseService {
             )
         }
     }
+
+    // MARK: - Assignment Resources
+
+    struct AssignmentResource: Identifiable {
+        var id: String
+        var assignmentId: Int
+        var url: String
+        var title: String
+        var type: String
+        var addedBy: String
+        var addedByName: String
+        var addedAt: Date
+    }
+
+    static func detectResourceType(from url: String) -> String {
+        let lower = url.lowercased()
+        if lower.contains("quizlet.com") { return "quizlet" }
+        if lower.contains("kahoot.it") || lower.contains("kahoot.com") { return "kahoot" }
+        if lower.contains("youtube.com") || lower.contains("youtu.be") { return "youtube" }
+        return "other"
+    }
+
+    func submitResource(assignmentId: Int, url: String, title: String, userEmail: String, userName: String) async throws {
+        let type = FirebaseService.detectResourceType(from: url)
+        let data: [String: Any] = [
+            "assignmentId": assignmentId,
+            "url": url,
+            "title": title,
+            "type": type,
+            "addedBy": userEmail,
+            "addedByName": userName,
+            "addedAt": Timestamp(date: Date())
+        ]
+        try await db.collection("assignmentResources").addDocument(data: data)
+    }
+
+    func fetchResources(assignmentId: Int) async throws -> [AssignmentResource] {
+        let snapshot = try await db.collection("assignmentResources")
+            .whereField("assignmentId", isEqualTo: assignmentId)
+            .getDocuments()
+
+        return snapshot.documents.map { doc in
+            let data = doc.data()
+            return AssignmentResource(
+                id: doc.documentID,
+                assignmentId: data["assignmentId"] as? Int ?? 0,
+                url: data["url"] as? String ?? "",
+                title: data["title"] as? String ?? "",
+                type: data["type"] as? String ?? "other",
+                addedBy: data["addedBy"] as? String ?? "",
+                addedByName: data["addedByName"] as? String ?? "",
+                addedAt: (data["addedAt"] as? Timestamp)?.dateValue() ?? Date()
+            )
+        }.sorted { $0.addedAt > $1.addedAt }
+    }
+
+    func fetchResourceAssignmentIds() async throws -> Set<Int> {
+        let snapshot = try await db.collection("assignmentResources").getDocuments()
+        var ids = Set<Int>()
+        for doc in snapshot.documents {
+            if let id = doc.data()["assignmentId"] as? Int {
+                ids.insert(id)
+            }
+        }
+        return ids
+    }
+
+    func deleteResource(documentId: String) async throws {
+        try await db.collection("assignmentResources").document(documentId).delete()
+    }
 }
