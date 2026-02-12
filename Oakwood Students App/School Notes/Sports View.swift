@@ -171,7 +171,7 @@ struct GameDetailView: View {
             }
         }
         .navigationTitle("Game Details")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .onAppear { Task { await loadData() } }
         .sheet(isPresented: $showScoreSheet) { scoreSheet }
     }
@@ -232,17 +232,23 @@ struct GameDetailView: View {
         NavigationStack {
             Form {
                 Section("Oakwood") {
-                    TextField("Score", text: event.isAway ? $awayScoreInput : $homeScoreInput).keyboardType(.numberPad)
+                    TextField("Score", text: event.isAway ? $awayScoreInput : $homeScoreInput)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
                 }
                 Section(event.opponent) {
-                    TextField("Score", text: event.isAway ? $homeScoreInput : $awayScoreInput).keyboardType(.numberPad)
+                    TextField("Score", text: event.isAway ? $homeScoreInput : $awayScoreInput)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
                 }
             }
             .navigationTitle("Report Score")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { showScoreSheet = false } }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showScoreSheet = false } }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Submit") { Task { await submitScore() } }
                         .disabled(homeScoreInput.isEmpty || awayScoreInput.isEmpty)
                 }
@@ -322,9 +328,9 @@ struct SportFilterView: View {
                 }
             }
             .navigationTitle("Filter Sports")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
     }
@@ -389,13 +395,14 @@ struct SportsView: View {
                 }
             }
             .navigationTitle("Sports")
+            .macInsetListStyle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button { showingSportFilter = true } label: {
                         Image(systemName: selectedSports.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button { Task { isLoading = true; await loadEvents() } } label: {
                         Image(systemName: "arrow.clockwise")
                     }

@@ -76,6 +76,7 @@ struct ToDoPage: View {
                 }
             }
             .navigationTitle("To Do")
+            .macInsetListStyle()
         }
         .onAppear {
             Task {
@@ -152,6 +153,7 @@ struct ShowAssignment: View {
             }
         }
         .padding(.vertical, 2)
+        .macRowPadding()
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
                 appInfo.toggleInfo(for: assignment.score_id)
@@ -232,7 +234,11 @@ struct AssignmentDetailView: View {
                 ForEach(resources) { resource in
                     Button {
                         if let url = URL(string: resource.url) {
+                            #if os(iOS)
                             UIApplication.shared.open(url)
+                            #elseif os(macOS)
+                            NSWorkspace.shared.open(url)
+                            #endif
                         }
                     } label: {
                         HStack(spacing: 10) {
@@ -279,7 +285,7 @@ struct AssignmentDetailView: View {
             }
         }
         .navigationTitle(assignment.assignment_description)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationBarTitle()
         .onAppear {
             if assignment.is_unread == 1 {
                 Task { await appInfo.markAssignmentAsRead(scoreID: assignment.score_id) }
@@ -287,13 +293,19 @@ struct AssignmentDetailView: View {
             loadResources()
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItem(placement: .confirmationAction) {
                 Button {
                     let renderer = ImageRenderer(content: GradeShareCard(assignment: assignment, courseName: courseName))
                     renderer.scale = 3
+                    #if os(iOS)
                     if let image = renderer.uiImage {
                         shareImage = IdentifiableImage(image: image)
                     }
+                    #elseif os(macOS)
+                    if let image = renderer.nsImage {
+                        shareImage = IdentifiableImage(image: image)
+                    }
+                    #endif
                 } label: {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
@@ -363,8 +375,10 @@ struct AddResourceSheet: View {
             Form {
                 Section {
                     TextField("URL (required)", text: $url)
+                        #if os(iOS)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
+                        #endif
                         .autocorrectionDisabled()
 
                     TextField("Title (optional)", text: $title)
@@ -381,7 +395,7 @@ struct AddResourceSheet: View {
                 }
             }
             .navigationTitle("Add Resource")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

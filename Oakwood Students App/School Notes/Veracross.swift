@@ -104,7 +104,7 @@ struct VeracrossGradesView: View {
     @EnvironmentObject var appInfo: AppInfo
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             switch loginState {
             case .checking:
                 ProgressView("Loading grades…")
@@ -122,8 +122,7 @@ struct VeracrossGradesView: View {
                 )
                 .navigationTitle("Login to Veracross")
             case .loggedIn:
-                NavigationStack {
-                    List {
+                List {
                         if let errorMessage = errorMessage {
                             Text("⚠️ \(errorMessage)")
                                 .foregroundColor(.red)
@@ -158,11 +157,12 @@ struct VeracrossGradesView: View {
                                     }
                                 }
                                 .padding(.vertical, 4)
+                                .macRowPadding()
                             }
                         }
                     }
                     .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
+                        ToolbarItem(placement: .cancellationAction) {
                             Button {
                                 Task {
                                     await loadGrades()
@@ -174,7 +174,7 @@ struct VeracrossGradesView: View {
                         }
                     }
                     .navigationTitle("Grades")
-                }
+                    .macInsetListStyle()
             }
         }
         .onAppear {
@@ -459,6 +459,52 @@ struct GradeChartView: View {
 }
 
 // MARK: - Login WebView
+
+class VeracrossLoginCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    var onLogin: () -> Void
+    init(onLogin: @escaping () -> Void) { self.onLogin = onLogin }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView.url?.absoluteString.contains("/student") == true {
+            onLogin()
+        }
+    }
+
+    // Prevent macOS from redirecting navigations to associated apps (e.g. Dock web apps)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        #if os(macOS)
+        if let policy = WKNavigationActionPolicy(rawValue: WKNavigationActionPolicy.allow.rawValue + 2) {
+            decisionHandler(policy, preferences)
+        } else {
+            decisionHandler(.allow, preferences)
+        }
+        #else
+        decisionHandler(.allow, preferences)
+        #endif
+    }
+
+    // Handle popup windows (e.g. Google/SAML OAuth) by creating a child WebView
+    // that shares the session via the provided configuration
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let popup = WKWebView(frame: webView.bounds, configuration: configuration)
+        popup.navigationDelegate = self
+        popup.uiDelegate = self
+        #if os(macOS)
+        popup.autoresizingMask = [.width, .height]
+        #else
+        popup.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        #endif
+        webView.addSubview(popup)
+        return popup
+    }
+
+    // Remove the popup when the page calls window.close()
+    func webViewDidClose(_ webView: WKWebView) {
+        webView.removeFromSuperview()
+    }
+}
+
+#if os(iOS)
 struct VeracrossLoginView: UIViewRepresentable {
     let url: URL
     var onLogin: () -> Void
@@ -468,25 +514,33 @@ struct VeracrossLoginView: UIViewRepresentable {
         config.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(onLogin: onLogin) }
-
-    class Coordinator: NSObject, WKNavigationDelegate {
-        var onLogin: () -> Void
-        init(onLogin: @escaping () -> Void) { self.onLogin = onLogin }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            if webView.url?.absoluteString.contains("/student") == true {
-                onLogin()
-            }
-        }
-    }
+    func makeCoordinator() -> VeracrossLoginCoordinator { VeracrossLoginCoordinator(onLogin: onLogin) }
 }
+#elseif os(macOS)
+struct VeracrossLoginView: NSViewRepresentable {
+    let url: URL
+    var onLogin: () -> Void
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func makeCoordinator() -> VeracrossLoginCoordinator { VeracrossLoginCoordinator(onLogin: onLogin) }
+}
+#endif
 
 // MARK: - Grade Share Card
 struct GradeShareCard: View {
@@ -586,9 +640,14 @@ struct GradeShareCard: View {
 // MARK: - Share Helpers
 struct IdentifiableImage: Identifiable {
     let id = UUID()
+    #if os(iOS)
     let image: UIImage
+    #elseif os(macOS)
+    let image: NSImage
+    #endif
 }
 
+#if os(iOS)
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -598,6 +657,22 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#elseif os(macOS)
+struct ShareSheet: NSViewRepresentable {
+    let items: [Any]
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        DispatchQueue.main.async {
+            let picker = NSSharingServicePicker(items: items)
+            picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+#endif
 
 // MARK: - Cookie Sync
 func syncCookies() async {

@@ -10,11 +10,14 @@ import SwiftUI
 // MARK: - SettingsView (Account settings and sign-in)
 struct SettingsView: View {
     @EnvironmentObject var appInfo: AppInfo
+    #if os(iOS)
     @AppStorage("gradeNotificationsEnabled") private var gradeNotificationsEnabled = true
+    #endif
 
     var body: some View {
         NavigationStack {
             List {
+                #if os(iOS)
                 // Notifications Section
                 Section {
                     Toggle(isOn: $gradeNotificationsEnabled) {
@@ -34,6 +37,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get notified when your grades change. Requires logging into Grades tab first.")
                 }
+                #endif
 
                 // Account Section
                 Section("Account") {

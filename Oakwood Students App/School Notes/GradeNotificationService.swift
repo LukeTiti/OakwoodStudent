@@ -6,8 +6,10 @@
 //
 
 import Foundation
+#if os(iOS)
 import UserNotifications
 import BackgroundTasks
+#endif
 
 // MARK: - GradeNotificationService
 class GradeNotificationService {
@@ -18,6 +20,7 @@ class GradeNotificationService {
     private let storedGradesKey = "storedGrades"
     private let notifiedAssignmentsKey = "notifiedAssignments"
 
+    #if os(iOS)
     // MARK: - Request Notification Permission
     func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -32,7 +35,7 @@ class GradeNotificationService {
     // MARK: - Schedule Background Refresh
     func scheduleBackgroundRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskIdentifier)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes minimum
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
 
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -44,25 +47,22 @@ class GradeNotificationService {
 
     // MARK: - Handle Background Refresh
     func handleBackgroundRefresh(task: BGAppRefreshTask, appInfo: AppInfo) {
-        // Schedule next refresh
         scheduleBackgroundRefresh()
 
-        // Create a task to fetch grades
         let fetchTask = Task {
             await checkForNewGrades(appInfo: appInfo)
         }
 
-        // Handle expiration
         task.expirationHandler = {
             fetchTask.cancel()
         }
 
-        // Complete when done
         Task {
             await fetchTask.value
             task.setTaskCompleted(success: true)
         }
     }
+    #endif
 
     // MARK: - Check for New Grades (with AppInfo)
     func checkForNewGrades(appInfo: AppInfo) async {
@@ -114,7 +114,9 @@ class GradeNotificationService {
                             courseName: course.className,
                             courseGrade: course.grade
                         )
+                        #if os(iOS)
                         await sendAssignmentNotification(for: change)
+                        #endif
 
                         // Mark as notified
                         notifiedIDs.insert(assignment.score_id)
@@ -186,15 +188,12 @@ class GradeNotificationService {
         }
     }
 
+    #if os(iOS)
     // MARK: - Test Notification
     func sendTestNotification() async {
-        // Check current authorization status
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        print("Notification authorization status: \(settings.authorizationStatus.rawValue)")
-        print("Alert setting: \(settings.alertSetting.rawValue)")
 
         if settings.authorizationStatus != .authorized {
-            print("Notifications not authorized! Requesting permission...")
             requestNotificationPermission()
             return
         }
@@ -205,7 +204,6 @@ class GradeNotificationService {
         content.sound = .default
         content.interruptionLevel = .timeSensitive
 
-        // Schedule 3 seconds from now so you can close the app
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
 
         let request = UNNotificationRequest(
@@ -217,8 +215,6 @@ class GradeNotificationService {
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
                 print("Failed to schedule notification: \(error)")
-            } else {
-                print("Notification will appear in 3 seconds - close the app now!")
             }
         }
     }
@@ -228,13 +224,11 @@ class GradeNotificationService {
         let content = UNMutableNotificationContent()
         content.title = change.assignmentName
 
-        // Build score string
         var scoreText = change.score
         if let max = change.maxScore {
             scoreText = "\(change.score)/\(max)"
         }
 
-        // Build body with score and class grade
         if let courseGrade = change.courseGrade {
             content.body = "\(scoreText) • \(change.courseName) now at \(courseGrade)%"
         } else {
@@ -255,11 +249,10 @@ class GradeNotificationService {
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
                 print("Failed to send notification: \(error)")
-            } else {
-                print("Sent notification for: \(change.assignmentName)")
             }
         }
     }
+    #endif
 
     // MARK: - Grade Storage
     private func loadStoredGrades() -> [StoredCourse] {

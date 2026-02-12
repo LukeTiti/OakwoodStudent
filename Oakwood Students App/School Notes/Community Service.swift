@@ -175,7 +175,7 @@ struct ServiceView: View {
                             .font(.headline)
                     }
                 }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .confirmationAction) {
                     Button(action: { showAddSheet = true }) { Image(systemName: "plus") }
                     Button(action: { showPDF = true }) { Image(systemName: "doc.text") }
                 }
@@ -184,9 +184,9 @@ struct ServiceView: View {
                 NavigationStack {
                     PDFViewer(url: pdfURL, appInfo: appInfo)
                         .navigationTitle("Service Form")
-                        .navigationBarTitleDisplayMode(.inline)
+                        .inlineNavigationBarTitle()
                         .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { showPDF = false } }
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { showPDF = false } }
                         }
                 }
             }
@@ -399,7 +399,7 @@ struct SubmittedFormDetailView: View {
             }
         }
         .navigationTitle(form.title)
-        .navigationBarTitleDisplayMode(.large)
+        .largeNavigationBarTitle()
     }
 }
 
@@ -419,17 +419,20 @@ struct AddServiceSheet: View {
         NavigationStack {
             Form {
                 TextField("Activity", text: $notes)
-                TextField("Hours", text: $hours).keyboardType(.decimalPad)
+                TextField("Hours", text: $hours)
+                    #if os(iOS)
+                    .keyboardType(.decimalPad)
+                    #endif
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                 Picker("Type", selection: $description) {
                     ForEach(descriptions, id: \.self) { Text($0).tag($0) }
                 }
             }
             .navigationTitle("Add Service Hours")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let formatter = DateFormatter()
                         formatter.dateFormat = "MM/dd/yyyy"
@@ -499,10 +502,10 @@ struct CreateFormSheet: View {
                 }
             }
             .navigationTitle("Submit Form")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
                     Button(action: submitForm) {
                         if isSubmitting { ProgressView() }
                         else { Text("Submit") }
@@ -543,6 +546,7 @@ struct CreateFormSheet: View {
 }
 
 // MARK: - PDFViewer (Displays PDF from URL with Veracross auth cookies)
+#if os(iOS)
 struct PDFViewer: UIViewRepresentable {
     let url: URL
     let appInfo: AppInfo
@@ -564,6 +568,29 @@ struct PDFViewer: UIViewRepresentable {
 
     func updateUIView(_ uiView: PDFView, context: Context) {}
 }
+#elseif os(macOS)
+struct PDFViewer: NSViewRepresentable {
+    let url: URL
+    let appInfo: AppInfo
+
+    func makeNSView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        Task {
+            await appInfo.restorePersistedCookiesIntoStores()
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let document = PDFDocument(data: data) {
+                    await MainActor.run { pdfView.document = document }
+                }
+            } catch { print("Failed to load PDF: \(error)") }
+        }
+        return pdfView
+    }
+
+    func updateNSView(_ nsView: PDFView, context: Context) {}
+}
+#endif
 
 // MARK: - Data Models
 

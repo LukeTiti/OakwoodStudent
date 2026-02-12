@@ -9,6 +9,8 @@ import SwiftUI
 import Combine
 import GoogleSignIn
 import FirebaseCore
+
+#if os(iOS)
 import BackgroundTasks
 import UserNotifications
 
@@ -52,8 +54,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // Handle background refresh task
     private func handleBackgroundRefresh(task: BGAppRefreshTask) {
-        // We need appInfo for cookies - create a temporary instance or use shared
-        // For now, just check grades without full appInfo context
         task.expirationHandler = {
             task.setTaskCompleted(success: false)
         }
@@ -61,11 +61,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         Task {
             await GradeNotificationService.shared.checkForNewGradesBackground()
             task.setTaskCompleted(success: true)
-            // Schedule next refresh
             GradeNotificationService.shared.scheduleBackgroundRefresh()
         }
     }
 }
+
+#elseif os(macOS)
+import AppKit
+
+// MARK: - macOS AppDelegate
+class MacAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        FirebaseApp.configure()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            _ = GIDSignIn.sharedInstance.handle(url)
+        }
+    }
+}
+#endif
 
 // MARK: - ViewModel for Google Sign-In
 class GoogleSignInViewModel: ObservableObject {
@@ -73,10 +89,10 @@ class GoogleSignInViewModel: ObservableObject {
     @Published var userName = ""
     @Published var userEmail = ""
 
-    // 🔑 Replace this with your Client ID from Google Cloud Console
     private let clientID = "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
 
     func signIn() {
+        #if os(iOS)
         guard let rootViewController = UIApplication.shared.connectedScenes
                 .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
                 .first?.rootViewController else { return }
@@ -88,10 +104,21 @@ class GoogleSignInViewModel: ObservableObject {
                 self.userName = user.profile?.name ?? ""
                 self.userEmail = user.profile?.email ?? ""
                 self.isSignedIn = true
-            } catch {
-                // Handle error if needed
-            }
+            } catch { }
         }
+        #elseif os(macOS)
+        guard let window = NSApplication.shared.keyWindow else { return }
+
+        Task {
+            do {
+                let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: window)
+                let user = result.user
+                self.userName = user.profile?.name ?? ""
+                self.userEmail = user.profile?.email ?? ""
+                self.isSignedIn = true
+            } catch { }
+        }
+        #endif
     }
 
     func signOut() {
@@ -126,7 +153,7 @@ struct SignInView: View {
         .padding()
         .onChange(of: appInfo.googleVM.isSignedIn) { newValue in
             if newValue {
-                appInfo.reloadID = UUID() // optional if you already do it in ContentView
+                appInfo.reloadID = UUID()
                 appInfo.signInSheet = false
             }
         }

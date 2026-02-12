@@ -120,9 +120,62 @@ struct HomeView: View {
     @StateObject private var viewModel = ScoopViewModel()
     // Use a valid default that matches a Picker tag. "" can represent "All".
     @State private var tag: String = ""
-    
+
+    @ToolbarContentBuilder
+    var scoopToolbar: some ToolbarContent {
+        ToolbarItem(placement: .confirmationAction) {
+            Picker("", selection: $tag) {
+                Text("All School").tag("")
+                Text("Lower School").tag("174")
+                Text("Middle School").tag("175")
+                Text("High School").tag("176")
+            }
+            .pickerStyle(.menu)
+            .frame(width: tag == "" ? 110 : tag == "176" ? 125 : 140)
+        }
+    }
+
     var body: some View {
         NavigationStack {
+            #if os(macOS)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 350), spacing: 16)], spacing: 16) {
+                    ForEach(viewModel.items) { item in
+                        NavigationLink(destination: EventView(events: item)) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                AsyncImage(url: URL(string: item.image)) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                } placeholder: {
+                                    Rectangle()
+                                        .fill(Color.secondary.opacity(0.2))
+                                        .overlay(ProgressView())
+                                }
+                                .frame(height: 160)
+                                .clipped()
+
+                                Text(item.title)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .padding(12)
+                            }
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .shadow(color: .black.opacity(0.15), radius: 3, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("Inside Scoop")
+            .toolbar { scoopToolbar }
+            .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
+            .onAppear { viewModel.fetchScoop(tag: tag) }
+            #else
             List(viewModel.items) { item in
                 NavigationLink(destination: EventView(events: item)) {
                     HStack() {
@@ -131,7 +184,7 @@ struct HomeView: View {
                                 .resizable()
                                 .scaledToFit()
                         } placeholder: {
-                            ProgressView() // spinner while loading
+                            ProgressView()
                         }
                             .frame(width: 100, height: 100)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -147,26 +200,10 @@ struct HomeView: View {
                 }
             }
             .navigationTitle("Inside Scoop")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Picker("", selection: $tag) {
-                        Text("All School").tag("")        // no tag filter
-                        Text("Lower School").tag("174")   // Lower School
-                        Text("Middle School").tag("175")  // Middle School
-                        Text("High School").tag("176")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: tag == "" ? 110 : tag == "176" ? 125 : 140) // keep it tight; width is mostly from label
-                }
-            }
-            .onChange(of: tag) { newValue in
-                // Refetch whenever the filter changes
-                viewModel.fetchScoop(tag: newValue)
-            }
-            .onAppear {
-                // Initial load (matches default tag "")
-                viewModel.fetchScoop(tag: tag)
-            }
+            .toolbar { scoopToolbar }
+            .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
+            .onAppear { viewModel.fetchScoop(tag: tag) }
+            #endif
         }
     }
 }
@@ -177,7 +214,7 @@ struct EventView: View {
     var body: some View {
         WebView(url: URL(string: events?.link ?? "")!)
             .navigationTitle(events?.title ?? "")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineNavigationBarTitle()
     }
 }
 
