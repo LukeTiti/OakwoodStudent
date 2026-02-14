@@ -40,6 +40,7 @@ struct Assignment: Codable, Identifiable {
     var due_date: String?
     var completion_status: String?
     var is_unread: Int?
+    var customCourseName: String?
 }
 
 // MARK: - Assignment Helpers

@@ -8,19 +8,25 @@ import SwiftUI
 
 struct ToDoPage: View {
     @State var errorMessage = ""
+    @State private var showAddAssignment = false
+    @State private var showAll = false
     @EnvironmentObject var appInfo: AppInfo
 
-    private var incompleteAssignments: [(assignment: Assignment, courseName: String)] {
-        appInfo.courses.flatMap { course in
+    private var filteredAssignments: [(assignment: Assignment, courseName: String)] {
+        let veracross = appInfo.courses.flatMap { course in
             (course.assignments ?? [])
-                .filter { appInfo.info[$0.score_id, default: false] == false }
+                .filter { showAll || appInfo.info[$0.score_id, default: false] == false }
                 .map { ($0, course.class_name) }
         }
+        let custom = appInfo.customAssignments
+            .filter { showAll || appInfo.info[$0.score_id, default: false] == false }
+            .map { ($0, $0.customCourseName ?? "Custom") }
+        return veracross + custom
     }
 
     private func assignmentsDue(dayOffset: Int) -> [(assignment: Assignment, courseName: String)] {
         guard let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) else { return [] }
-        return incompleteAssignments.filter { item in
+        return filteredAssignments.filter { item in
             guard let dueDate = item.assignment.dueDate else { return false }
             return Calendar.current.isDate(dueDate, inSameDayAs: targetDate)
         }
@@ -28,7 +34,18 @@ struct ToDoPage: View {
 
     private var pastDueAssignments: [(assignment: Assignment, courseName: String)] {
         let startOfToday = Calendar.current.startOfDay(for: Date())
-        return incompleteAssignments.filter { item in
+        let allSources: [(assignment: Assignment, courseName: String)] = {
+            let veracross = appInfo.courses.flatMap { course in
+                (course.assignments ?? [])
+                    .filter { appInfo.info[$0.score_id, default: false] == false }
+                    .map { ($0, course.class_name) }
+            }
+            let custom = appInfo.customAssignments
+                .filter { appInfo.info[$0.score_id, default: false] == false }
+                .map { ($0, $0.customCourseName ?? "Custom") }
+            return veracross + custom
+        }()
+        return allSources.filter { item in
             guard let dueDate = item.assignment.dueDate else { return false }
             return dueDate < startOfToday
         }
@@ -77,6 +94,26 @@ struct ToDoPage: View {
             }
             .navigationTitle("To Do")
             .macInsetListStyle()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        withAnimation { showAll.toggle() }
+                    } label: {
+                        Image(systemName: showAll ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        showAddAssignment = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddAssignment) {
+                AddAssignmentSheet()
+                    .environmentObject(appInfo)
+            }
         }
         .onAppear {
             Task {
@@ -166,6 +203,15 @@ struct ShowAssignment: View {
             }
             .tint(appInfo.info[assignment.score_id, default: false] ? .orange : .green)
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if assignment.score_id < 0 {
+                Button(role: .destructive) {
+                    appInfo.deleteCustomAssignment(scoreId: assignment.score_id)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
     }
 }
 
@@ -176,6 +222,8 @@ struct AssignmentDetailView: View {
     @State private var shareImage: IdentifiableImage?
     @State private var resources: [FirebaseService.AssignmentResource] = []
     @State private var showAddResource = false
+
+    private var isCustom: Bool { assignment.score_id < 0 }
 
     var body: some View {
         List {
@@ -230,58 +278,60 @@ struct AssignmentDetailView: View {
                 }
             }
 
-            Section {
-                ForEach(resources) { resource in
-                    Button {
-                        if let url = URL(string: resource.url) {
-                            #if os(iOS)
-                            UIApplication.shared.open(url)
-                            #elseif os(macOS)
-                            NSWorkspace.shared.open(url)
-                            #endif
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: resourceIcon(for: resource.type))
-                                .foregroundColor(resourceColor(for: resource.type))
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(resource.title)
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                Text("Added by \(resource.addedByName)")
+            if !isCustom {
+                Section {
+                    ForEach(resources) { resource in
+                        Button {
+                            if let url = URL(string: resource.url) {
+                                #if os(iOS)
+                                UIApplication.shared.open(url)
+                                #elseif os(macOS)
+                                NSWorkspace.shared.open(url)
+                                #endif
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: resourceIcon(for: resource.type))
+                                    .foregroundColor(resourceColor(for: resource.type))
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(resource.title)
+                                        .font(.body)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    Text("Added by \(resource.addedByName)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
-                            Spacer()
-                            Image(systemName: "arrow.up.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if resource.addedBy == appInfo.googleVM.userEmail {
-                            Button(role: .destructive) {
-                                Task {
-                                    try? await FirebaseService.shared.deleteResource(documentId: resource.id)
-                                    loadResources()
-                                    await appInfo.loadResourceAssignmentIds()
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if resource.addedBy == appInfo.googleVM.userEmail {
+                                Button(role: .destructive) {
+                                    Task {
+                                        try? await FirebaseService.shared.deleteResource(documentId: resource.id)
+                                        loadResources()
+                                        await appInfo.loadResourceAssignmentIds()
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                }
 
-                Button {
-                    showAddResource = true
-                } label: {
-                    Label("Add Resource", systemImage: "plus.circle")
+                    Button {
+                        showAddResource = true
+                    } label: {
+                        Label("Add Resource", systemImage: "plus.circle")
+                    }
+                } header: {
+                    Text("Resources")
                 }
-            } header: {
-                Text("Resources")
             }
         }
         .navigationTitle(assignment.assignment_description)
@@ -290,7 +340,7 @@ struct AssignmentDetailView: View {
             if assignment.is_unread == 1 {
                 Task { await appInfo.markAssignmentAsRead(scoreID: assignment.score_id) }
             }
-            loadResources()
+            if !isCustom { loadResources() }
         }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -427,6 +477,83 @@ struct AddResourceSheet: View {
             )
             onSubmit()
             dismiss()
+        }
+    }
+}
+
+// MARK: - Add Assignment Sheet
+struct AddAssignmentSheet: View {
+    @EnvironmentObject var appInfo: AppInfo
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var selectedCourse = ""
+    @State private var dueDate = Date()
+    @State private var assignmentType = "Homework"
+    @State private var notes = ""
+
+    private let typeOptions = ["Homework", "Classwork", "Quiz", "Test", "Exam", "Other"]
+
+    private var canSubmit: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && !selectedCourse.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Course", selection: $selectedCourse) {
+                        Text("Select a course").tag("")
+                        ForEach(appInfo.courses) { course in
+                            Text(course.class_name).tag(course.class_name)
+                        }
+                    }
+
+                    TextField("Assignment Name", text: $name)
+
+                    DatePicker("Due Date", selection: $dueDate, displayedComponents: .date)
+                }
+
+                Section {
+                    Picker("Type", selection: $assignmentType) {
+                        ForEach(typeOptions, id: \.self) { type in
+                            HStack {
+                                Badge(text: type, color: assignmentTypeColor(type))
+                                Spacer()
+                            }
+                            .tag(type)
+                        }
+                    }
+                    #if os(iOS)
+                    .pickerStyle(.navigationLink)
+                    #endif
+                }
+
+                Section("Notes") {
+                    TextField("Optional notes", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("Add Assignment")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        appInfo.addCustomAssignment(
+                            courseName: selectedCourse,
+                            description: name.trimmingCharacters(in: .whitespaces),
+                            dueDate: dueDate,
+                            type: assignmentType,
+                            notes: notes.trimmingCharacters(in: .whitespaces)
+                        )
+                        dismiss()
+                    }
+                    .disabled(!canSubmit)
+                }
+            }
         }
     }
 }

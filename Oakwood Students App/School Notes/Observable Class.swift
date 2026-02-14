@@ -31,6 +31,10 @@ class AppInfo: ObservableObject {
     @Published var courses: [Course] = []
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
+    @Published var customAssignments: [Assignment] = [] {
+        didSet { saveCustomAssignments() }
+    }
+    private var nextCustomId: Int = -1
     @Published var info: [Int: Bool] = [:] {
         didSet {
             saveAssignmentInfo()
@@ -50,6 +54,7 @@ class AppInfo: ObservableObject {
 
     init() {
         loadAssignmentInfo()
+        loadCustomAssignments()
         loadCookies()
         loadGoogleLogin()
 
@@ -73,6 +78,46 @@ class AppInfo: ObservableObject {
            let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
             info = decoded
         }
+    }
+
+    // MARK: - Custom Assignments
+
+    private func saveCustomAssignments() {
+        if let data = try? JSONEncoder().encode(customAssignments) {
+            UserDefaults.standard.set(data, forKey: "customAssignments")
+        }
+        UserDefaults.standard.set(nextCustomId, forKey: "nextCustomId")
+    }
+
+    private func loadCustomAssignments() {
+        if let data = UserDefaults.standard.data(forKey: "customAssignments"),
+           let decoded = try? JSONDecoder().decode([Assignment].self, from: data) {
+            customAssignments = decoded
+        }
+        nextCustomId = UserDefaults.standard.object(forKey: "nextCustomId") as? Int ?? -1
+    }
+
+    func addCustomAssignment(courseName: String, description: String, dueDate: Date, type: String, notes: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
+        let assignment = Assignment(
+            score_id: nextCustomId,
+            assignment_type: type,
+            assignment_description: description,
+            assignment_notes: notes.isEmpty ? nil : notes,
+            due_date: formatter.string(from: dueDate),
+            customCourseName: courseName
+        )
+        nextCustomId -= 1
+        customAssignments.append(assignment)
+        info[assignment.score_id] = false
+    }
+
+    func deleteCustomAssignment(scoreId: Int) {
+        customAssignments.removeAll { $0.score_id == scoreId }
+        info.removeValue(forKey: scoreId)
     }
 
     // MARK: - Google VM persistence
