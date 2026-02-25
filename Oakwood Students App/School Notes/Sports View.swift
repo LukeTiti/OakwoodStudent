@@ -57,6 +57,48 @@ struct SportsEvent: Identifiable {
     }
 }
 
+// MARK: - School Event
+struct SchoolEvent: Identifiable {
+    let id: String
+    let title: String
+    let date: Date
+    let startTime: String
+    let endTime: String
+    let location: String
+    let description: String
+
+    var timeText: String {
+        endTime.isEmpty ? startTime : "\(startTime) - \(endTime)"
+    }
+}
+
+// MARK: - Calendar Item (unified wrapper)
+enum CalendarItem: Identifiable {
+    case sports(SportsEvent)
+    case school(SchoolEvent)
+
+    var id: String {
+        switch self {
+        case .sports(let e): return e.id
+        case .school(let e): return e.id
+        }
+    }
+
+    var date: Date {
+        switch self {
+        case .sports(let e): return e.date
+        case .school(let e): return e.date
+        }
+    }
+
+    var category: String {
+        switch self {
+        case .sports(let e): return e.sportName
+        case .school: return "School Events"
+        }
+    }
+}
+
 // MARK: - Sports Event Row
 struct SportsEventRow: View {
     let event: SportsEvent
@@ -70,7 +112,9 @@ struct SportsEventRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Badge(text: event.sportName, color: .blue)
-                Badge(text: event.teamName, color: .purple)
+                if !event.teamName.isEmpty {
+                    Badge(text: event.teamName, color: .purple)
+                }
                 Spacer()
                 Badge(text: event.isAway ? "Away" : "Home", color: event.isAway ? .orange : .green)
             }
@@ -91,6 +135,54 @@ struct SportsEventRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - School Event Row
+struct SchoolEventRow: View {
+    let event: SchoolEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Badge(text: "School Event", color: .teal)
+                Spacer()
+            }
+            Text(event.title).fontWeight(.semibold)
+            Label(event.timeText, systemImage: "clock").font(.caption).foregroundColor(.secondary)
+            if !event.location.isEmpty {
+                Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - School Event Detail View
+struct SchoolEventDetailView: View {
+    let event: SchoolEvent
+
+    var body: some View {
+        List {
+            Section {
+                Badge(text: "School Event", color: .teal)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(event.title).font(.title2).fontWeight(.bold)
+                    Label(event.date.formatted(date: .complete, time: .omitted), systemImage: "calendar").foregroundColor(.secondary)
+                    Label(event.timeText, systemImage: "clock").foregroundColor(.secondary)
+                    if !event.location.isEmpty {
+                        Label(event.location, systemImage: "mappin.circle").foregroundColor(.secondary)
+                    }
+                }
+            }
+            if !event.description.isEmpty {
+                Section("Details") {
+                    Text(event.description)
+                }
+            }
+        }
+        .navigationTitle("Event Details")
+        .inlineNavigationBarTitle()
     }
 }
 
@@ -118,7 +210,9 @@ struct GameDetailView: View {
             Section {
                 HStack {
                     Badge(text: event.sportName, color: .blue)
-                    Badge(text: event.teamName, color: .purple)
+                    if !event.teamName.isEmpty {
+                        Badge(text: event.teamName, color: .purple)
+                    }
                     Spacer()
                     Badge(text: event.isAway ? "Away" : "Home", color: event.isAway ? .orange : .green)
                 }
@@ -298,28 +392,28 @@ struct GameDetailView: View {
     }
 }
 
-// MARK: - Sport Filter View
-struct SportFilterView: View {
-    let allSports: [String]
-    @Binding var selectedSports: Set<String>
+// MARK: - Calendar Filter View
+struct CalendarFilterView: View {
+    let allCategories: [String]
+    @Binding var selectedCategories: Set<String>
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Button("Show All Sports") { selectedSports.removeAll() }.foregroundColor(.blue)
+                    Button("Show All") { selectedCategories.removeAll() }.foregroundColor(.blue)
                 }
-                Section("Select Sports") {
-                    ForEach(allSports, id: \.self) { sport in
+                Section("Filter Events") {
+                    ForEach(allCategories, id: \.self) { category in
                         Button {
-                            if selectedSports.contains(sport) { selectedSports.remove(sport) }
-                            else { selectedSports.insert(sport) }
+                            if selectedCategories.contains(category) { selectedCategories.remove(category) }
+                            else { selectedCategories.insert(category) }
                         } label: {
                             HStack {
-                                Text(sport).foregroundColor(.primary)
+                                Text(category).foregroundColor(.primary)
                                 Spacer()
-                                if selectedSports.contains(sport) {
+                                if selectedCategories.contains(category) {
                                     Image(systemName: "checkmark").foregroundColor(.blue)
                                 }
                             }
@@ -327,7 +421,7 @@ struct SportFilterView: View {
                     }
                 }
             }
-            .navigationTitle("Filter Sports")
+            .navigationTitle("Filter Events")
             .inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -336,32 +430,34 @@ struct SportFilterView: View {
     }
 }
 
-// MARK: - Sports View
-struct SportsView: View {
-    @State private var events: [SportsEvent] = []
+// MARK: - Calendar View
+struct CalendarView: View {
+    @State private var items: [CalendarItem] = []
     @State private var scores: [String: GameScore] = [:]
     @State private var isLoading = true
     @State private var selectedTab = 0
-    @State private var showingSportFilter = false
-    @State private var selectedSports: Set<String> = {
-        guard let data = UserDefaults.standard.data(forKey: "selectedSports"),
-              let sports = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
-        return sports
+    @State private var showingFilter = false
+    @State private var selectedCategories: Set<String> = {
+        guard let data = UserDefaults.standard.data(forKey: "selectedCategories"),
+              let cats = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
+        return cats
     }()
 
-    var allSports: [String] { Array(Set(events.map { $0.sportName })).sorted() }
+    var allCategories: [String] {
+        Array(Set(items.map { $0.category })).sorted()
+    }
 
-    var filteredEvents: [SportsEvent] {
+    var filteredItems: [CalendarItem] {
         let today = Calendar.current.startOfDay(for: Date())
-        var filtered = selectedSports.isEmpty ? events : events.filter { selectedSports.contains($0.sportName) }
+        var filtered = selectedCategories.isEmpty ? items : items.filter { selectedCategories.contains($0.category) }
         filtered = selectedTab == 0 ? filtered.filter { $0.date >= today } : filtered.filter { $0.date < today }
         return filtered
     }
 
-    var groupedEvents: [(String, [SportsEvent])] {
+    var groupedItems: [(String, [CalendarItem])] {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMM d"
-        let grouped = Dictionary(grouping: filteredEvents) { formatter.string(from: $0.date) }
+        let grouped = Dictionary(grouping: filteredItems) { formatter.string(from: $0.date) }
         let sorted = grouped.sorted { ($0.value.first?.date ?? .distantPast) < ($1.value.first?.date ?? .distantPast) }
         return selectedTab == 1 ? sorted.reversed() : sorted
     }
@@ -378,15 +474,22 @@ struct SportsView: View {
 
                 if isLoading {
                     Spacer(); ProgressView("Loading events..."); Spacer()
-                } else if filteredEvents.isEmpty {
+                } else if filteredItems.isEmpty {
                     Spacer(); Text(selectedTab == 0 ? "No upcoming events" : "No past events").foregroundColor(.secondary); Spacer()
                 } else {
                     List {
-                        ForEach(groupedEvents, id: \.0) { date, events in
+                        ForEach(groupedItems, id: \.0) { date, items in
                             Section(date) {
-                                ForEach(events) { event in
-                                    NavigationLink(destination: GameDetailView(event: event)) {
-                                        SportsEventRow(event: event, score: scores[event.id])
+                                ForEach(items) { item in
+                                    switch item {
+                                    case .sports(let event):
+                                        NavigationLink(destination: GameDetailView(event: event)) {
+                                            SportsEventRow(event: event, score: scores[event.id])
+                                        }
+                                    case .school(let event):
+                                        NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                                            SchoolEventRow(event: event)
+                                        }
                                     }
                                 }
                             }
@@ -394,93 +497,93 @@ struct SportsView: View {
                     }
                 }
             }
-            .navigationTitle("Sports")
+            .navigationTitle("Calendar")
             .macInsetListStyle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { showingSportFilter = true } label: {
-                        Image(systemName: selectedSports.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    Button { showingFilter = true } label: {
+                        Image(systemName: selectedCategories.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { isLoading = true; await loadEvents() } } label: {
+                    Button { Task { isLoading = true; await loadAllEvents() } } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
             }
-            .sheet(isPresented: $showingSportFilter) {
-                SportFilterView(allSports: allSports, selectedSports: $selectedSports)
+            .sheet(isPresented: $showingFilter) {
+                CalendarFilterView(allCategories: allCategories, selectedCategories: $selectedCategories)
             }
-            .onChange(of: selectedSports) { _, _ in
-                if let data = try? JSONEncoder().encode(selectedSports) {
-                    UserDefaults.standard.set(data, forKey: "selectedSports")
+            .onChange(of: selectedCategories) { _, _ in
+                if let data = try? JSONEncoder().encode(selectedCategories) {
+                    UserDefaults.standard.set(data, forKey: "selectedCategories")
                 }
             }
         }
         .onAppear {
-            if events.isEmpty { Task { await loadEvents() } }
+            if items.isEmpty { Task { await loadAllEvents() } }
             else { Task { await refreshScores() } }
         }
     }
 
-    func loadEvents() async {
-        var allEvents: [SportsEvent] = []
-        await withTaskGroup(of: [SportsEvent].self) { group in
-            for calendar in teamCalendars {
-                group.addTask { await fetchEvents(from: calendar) }
-            }
-            for await events in group { allEvents.append(contentsOf: events) }
-        }
+    // MARK: - Data Loading
 
+    func loadAllEvents() async {
+        async let sportsTask = loadSportsEvents()
+        async let schoolTask = loadSchoolEvents()
+
+        let (sports, school) = await (sportsTask, schoolTask)
+
+        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) }
         var seen = Set<String>()
-        let unique = allEvents.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
+        let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
         let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
 
         await MainActor.run {
-            events = unique
+            items = unique
             scores = fetchedScores
             isLoading = false
         }
+    }
+
+    func loadSportsEvents() async -> [SportsEvent] {
+        var allEvents: [SportsEvent] = []
+        await withTaskGroup(of: [SportsEvent].self) { group in
+            for calendar in teamCalendars {
+                group.addTask { await fetchSportsEvents(from: calendar) }
+            }
+            for await events in group { allEvents.append(contentsOf: events) }
+        }
+        return allEvents
+    }
+
+    func loadSchoolEvents() async -> [SchoolEvent] {
+        guard !schoolEventsCalendarURL.isEmpty,
+              let url = URL(string: schoolEventsCalendarURL),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let ics = String(data: data, encoding: .utf8) else { return [] }
+        return parseSchoolEvents(ics)
     }
 
     func refreshScores() async {
         scores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
     }
 
-    func fetchEvents(from calendar: TeamCalendar) async -> [SportsEvent] {
+    // MARK: - Sports iCal Parsing
+
+    func fetchSportsEvents(from calendar: TeamCalendar) async -> [SportsEvent] {
         guard let url = URL(string: calendar.url),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let ics = String(data: data, encoding: .utf8) else { return [] }
-        return parseICalEvents(ics, calendar: calendar)
+        return parseSportsICalEvents(ics, calendar: calendar)
     }
 
-    func parseICalEvents(_ ics: String, calendar: TeamCalendar) -> [SportsEvent] {
-        // Unfold iCal lines
-        let unfolded = ics
-            .replacingOccurrences(of: "\r\n ", with: "")
-            .replacingOccurrences(of: "\r\n\t", with: "")
-            .replacingOccurrences(of: "\n ", with: "")
-            .replacingOccurrences(of: "\n\t", with: "")
-
-        var events: [SportsEvent] = []
-        var current: [String: String] = [:]
-        var inEvent = false
-
-        for line in unfolded.components(separatedBy: .newlines) {
-            let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
-            if l == "BEGIN:VEVENT" { inEvent = true; current = [:] }
-            else if l == "END:VEVENT" {
-                if let event = createEvent(from: current, calendar: calendar) { events.append(event) }
-                inEvent = false
-            } else if inEvent, let idx = l.firstIndex(of: ":") {
-                let key = String(l[..<idx]).components(separatedBy: ";").first ?? ""
-                current[key] = String(l[l.index(after: idx)...])
-            }
-        }
-        return events
+    func parseSportsICalEvents(_ ics: String, calendar: TeamCalendar) -> [SportsEvent] {
+        let records = parseICalRecords(ics)
+        return records.compactMap { createSportsEvent(from: $0, calendar: calendar) }
     }
 
-    func createEvent(from data: [String: String], calendar: TeamCalendar) -> SportsEvent? {
+    func createSportsEvent(from data: [String: String], calendar: TeamCalendar) -> SportsEvent? {
         guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
 
         let date = parseDate(dtstart)
@@ -493,7 +596,7 @@ struct SportsView: View {
         let isCancelled = summary.contains("CANCELLED") || data["STATUS"] == "CANCELLED"
         let isAway = summary.contains("(Away)") ? true : (summary.contains("(Home)") || location.lowercased().contains("oakwood")) ? false : true
 
-        var teamName = calendar.name
+        let teamName = calendar.name
             .replacingOccurrences(of: " \(calendar.sport)", with: "")
             .replacingOccurrences(of: calendar.sport, with: "")
             .trimmingCharacters(in: .whitespaces)
@@ -505,6 +608,69 @@ struct SportsView: View {
             location: location, isAway: isAway, isCancelled: isCancelled,
             sportName: calendar.sport, teamName: teamName
         )
+    }
+
+    // MARK: - School Event iCal Parsing
+
+    func parseSchoolEvents(_ ics: String) -> [SchoolEvent] {
+        let records = parseICalRecords(ics)
+        return records.compactMap { createSchoolEvent(from: $0) }
+    }
+
+    func createSchoolEvent(from data: [String: String]) -> SchoolEvent? {
+        guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
+
+        // Skip daily schedule markers like "HS Tuesday", "LS Monday", "MS Friday"
+        if summary.range(of: "^(HS|LS|MS)\\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$", options: .regularExpression) != nil {
+            return nil
+        }
+
+        // Skip sports matchups - these are duplicates of the team calendar events
+        if summary.range(of: "\\bvs\\b", options: [.regularExpression, .caseInsensitive]) != nil {
+            return nil
+        }
+
+        let date = parseDate(dtstart)
+        let endDate = data["DTEND"].flatMap { parseDate($0) }
+        let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
+        let description = data["DESCRIPTION"]?.replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\,", with: ",") ?? ""
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+
+        return SchoolEvent(
+            id: uid, title: summary, date: date,
+            startTime: timeFormatter.string(from: date),
+            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
+            location: location, description: description
+        )
+    }
+
+    // MARK: - Shared iCal Helpers
+
+    func parseICalRecords(_ ics: String) -> [[String: String]] {
+        let unfolded = ics
+            .replacingOccurrences(of: "\r\n ", with: "")
+            .replacingOccurrences(of: "\r\n\t", with: "")
+            .replacingOccurrences(of: "\n ", with: "")
+            .replacingOccurrences(of: "\n\t", with: "")
+
+        var records: [[String: String]] = []
+        var current: [String: String] = [:]
+        var inEvent = false
+
+        for line in unfolded.components(separatedBy: .newlines) {
+            let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if l == "BEGIN:VEVENT" { inEvent = true; current = [:] }
+            else if l == "END:VEVENT" {
+                records.append(current)
+                inEvent = false
+            } else if inEvent, let idx = l.firstIndex(of: ":") {
+                let key = String(l[..<idx]).components(separatedBy: ";").first ?? ""
+                current[key] = String(l[l.index(after: idx)...])
+            }
+        }
+        return records
     }
 
     func parseDate(_ str: String) -> Date {

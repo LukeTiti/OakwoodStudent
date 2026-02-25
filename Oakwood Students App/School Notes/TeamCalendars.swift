@@ -13,6 +13,8 @@ struct TeamCalendar {
     let url: String
 }
 
+let schoolEventsCalendarURL = "https://api.veracross.com/oakwood/subscribe/9E7F7993-EB95-4710-B481-AF2130F54B16.ics?uid=E5D94FBE-AA0F-45B4-BD53-B73811D0A8C4"
+
 let teamCalendars: [TeamCalendar] = [
     // Basketball - Boys
     TeamCalendar(name: "Boys Varsity Basketball", sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62364.ics?t=574b1058ac7e848e69b5c195b9c6871f&uid=C8955EBA-FBF4-4238-8DDC-0DA396078E59"),

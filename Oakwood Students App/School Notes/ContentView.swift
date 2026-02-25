@@ -51,7 +51,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case insideScoop = "Inside Scoop"
     case toDo = "To Do"
     case grades = "Grades"
-    case sports = "Sports"
+    case calendar = "Calendar"
     case service = "Service"
 
     var id: String { rawValue }
@@ -61,7 +61,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .insideScoop: return "newspaper"
         case .toDo: return "list.bullet"
         case .grades: return "list.bullet.rectangle.portrait"
-        case .sports: return "trophy.fill"
+        case .calendar: return "calendar"
         case .service: return "heart.fill"
         }
     }
@@ -72,7 +72,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .insideScoop: HomeView()
         case .toDo: ToDoPage()
         case .grades: VeracrossGradesView()
-        case .sports: SportsView()
+        case .calendar: CalendarView()
         case .service: ServiceView()
         }
     }
@@ -97,8 +97,8 @@ struct ContentView: View {
             Tab("Grades", systemImage: "list.bullet.rectangle.portrait") {
                 VeracrossGradesView()
             }
-            Tab("Sports", systemImage: "trophy.fill") {
-                SportsView()
+            Tab("Calendar", systemImage: "calendar") {
+                CalendarView()
             }
             Tab("Service", systemImage: "heart.fill") {
                 ServiceView()
