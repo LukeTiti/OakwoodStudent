@@ -186,6 +186,11 @@ struct ShowAssignment: View {
                 } else {
                     Text(assignment.due_date ?? "")
                         .foregroundColor(.secondary)
+                    if assignment.completion_status == "Not Turned In" {
+                        Text("NTI")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
                 }
             }
         }

@@ -103,6 +103,7 @@ enum CalendarItem: Identifiable {
 struct SportsEventRow: View {
     let event: SportsEvent
     let score: GameScore?
+    var mySignups: [ScoreboardSignup] = []
 
     var oakwoodScore: Int { score.map { event.isAway ? $0.awayScore : $0.homeScore } ?? 0 }
     var opponentScore: Int { score.map { event.isAway ? $0.homeScore : $0.awayScore } ?? 0 }
@@ -128,7 +129,18 @@ struct SportsEventRow: View {
             }
             Label(event.timeText, systemImage: "clock").font(.caption).foregroundColor(.secondary)
             if !event.location.isEmpty {
-                Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary)
+                    if let job = mySignups.first?.job {
+                        Text("· Working: \(job)")
+                            .font(.caption2)
+                            .foregroundColor(.indigo)
+                    }
+                }
+            } else if let job = mySignups.first?.job {
+                Text("Working: \(job)")
+                    .font(.caption2)
+                    .foregroundColor(.indigo)
             }
             if event.isCancelled {
                 Badge(text: "Cancelled", color: .red)
@@ -432,8 +444,10 @@ struct CalendarFilterView: View {
 
 // MARK: - Calendar View
 struct CalendarView: View {
+    @EnvironmentObject var appInfo: AppInfo
     @State private var items: [CalendarItem] = []
     @State private var scores: [String: GameScore] = [:]
+    @State private var mySignups: [String: [ScoreboardSignup]] = [:]
     @State private var isLoading = true
     @State private var selectedTab = 0
     @State private var showingFilter = false
@@ -484,7 +498,7 @@ struct CalendarView: View {
                                     switch item {
                                     case .sports(let event):
                                         NavigationLink(destination: GameDetailView(event: event)) {
-                                            SportsEventRow(event: event, score: scores[event.id])
+                                            SportsEventRow(event: event, score: scores[event.id], mySignups: mySignups[event.id] ?? [])
                                         }
                                     case .school(let event):
                                         NavigationLink(destination: SchoolEventDetailView(event: event)) {
@@ -538,6 +552,7 @@ struct CalendarView: View {
         var seen = Set<String>()
         let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
         let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
+        await loadMySignups()
 
         await MainActor.run {
             items = unique
@@ -566,7 +581,17 @@ struct CalendarView: View {
     }
 
     func refreshScores() async {
-        scores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
+        async let scoresTask = FirebaseService.shared.fetchAllGameScores()
+        await loadMySignups()
+        scores = (try? await scoresTask) ?? [:]
+    }
+
+    func loadMySignups() async {
+        let email = appInfo.googleVM.userEmail
+        guard !email.isEmpty else { return }
+        let signups = (try? await FirebaseService.shared.fetchMySignups(userEmail: email)) ?? []
+        let grouped = Dictionary(grouping: signups) { $0.eventId }
+        await MainActor.run { mySignups = grouped }
     }
 
     // MARK: - Sports iCal Parsing
