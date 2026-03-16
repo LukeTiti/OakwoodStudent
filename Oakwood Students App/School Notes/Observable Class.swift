@@ -31,6 +31,12 @@ class AppInfo: ObservableObject {
     @Published var courses: [Course] = []
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
+
+    // MARK: - Calendar State
+    @Published var calendarItems: [CalendarItem] = []
+    @Published var calendarScores: [String: GameScore] = [:]
+    @Published var calendarMySignups: [String: [ScoreboardSignup]] = [:]
+    @Published var calendarIsLoading = false
     @Published var customAssignments: [Assignment] = [] {
         didSet { saveCustomAssignments() }
     }
@@ -369,6 +375,172 @@ class AppInfo: ObservableObject {
         } catch {
             return "Network error: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Preload
+
+    func preloadAll() {
+        Task {
+            await restorePersistedCookiesIntoStores()
+            async let grades: () = preloadGrades()
+            async let calendar: () = loadAllCalendarEvents()
+            await grades; await calendar
+        }
+    }
+
+    func preloadGrades() async {
+        guard !persistedCookies.isEmpty, courses.isEmpty else { return }
+        await syncCookies()
+        _ = await loadCourses()
+        _ = await loadAllAssignments()
+    }
+
+    // MARK: - Calendar Loading
+
+    func loadAllCalendarEvents() async {
+        guard !calendarIsLoading else { return }
+        await MainActor.run { calendarIsLoading = true }
+
+        async let sportsTask = loadCalendarSportsEvents()
+        async let schoolTask = loadCalendarSchoolEvents()
+        let (sports, school) = await (sportsTask, schoolTask)
+
+        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) }
+        var seen = Set<String>()
+        let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
+        let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
+        await loadCalendarMySignups()
+
+        await MainActor.run {
+            calendarItems = unique
+            calendarScores = fetchedScores
+            calendarIsLoading = false
+        }
+    }
+
+    func refreshCalendarData() async {
+        async let scoresTask = FirebaseService.shared.fetchAllGameScores()
+        await loadCalendarMySignups()
+        let scores = (try? await scoresTask) ?? [:]
+        await MainActor.run { calendarScores = scores }
+    }
+
+    func loadCalendarMySignups() async {
+        let email = googleVM.userEmail
+        guard !email.isEmpty else { return }
+        let signups = (try? await FirebaseService.shared.fetchMySignups(userEmail: email)) ?? []
+        let grouped = Dictionary(grouping: signups) { $0.eventId }
+        await MainActor.run { calendarMySignups = grouped }
+    }
+
+    func loadCalendarSportsEvents() async -> [SportsEvent] {
+        var allEvents: [SportsEvent] = []
+        await withTaskGroup(of: [SportsEvent].self) { group in
+            for cal in teamCalendars {
+                group.addTask { await self.fetchCalendarSportsEvents(from: cal) }
+            }
+            for await events in group { allEvents.append(contentsOf: events) }
+        }
+        return allEvents
+    }
+
+    func loadCalendarSchoolEvents() async -> [SchoolEvent] {
+        guard !schoolEventsCalendarURL.isEmpty,
+              let url = URL(string: schoolEventsCalendarURL),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let ics = String(data: data, encoding: .utf8) else { return [] }
+        return parseCalendarSchoolEvents(ics)
+    }
+
+    func fetchCalendarSportsEvents(from calendar: TeamCalendar) async -> [SportsEvent] {
+        guard let url = URL(string: calendar.url),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let ics = String(data: data, encoding: .utf8) else { return [] }
+        return parseSportsICalEvents(ics, calendar: calendar)
+    }
+
+    func parseSportsICalEvents(_ ics: String, calendar: TeamCalendar) -> [SportsEvent] {
+        return parseICalRecords(ics).compactMap { createSportsEvent(from: $0, calendar: calendar) }
+    }
+
+    func createSportsEvent(from data: [String: String], calendar: TeamCalendar) -> SportsEvent? {
+        guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
+        let date = parseICalDate(dtstart)
+        let endDate = data["DTEND"].flatMap { parseICalDate($0) }
+        let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        let isCancelled = summary.contains("CANCELLED") || data["STATUS"] == "CANCELLED"
+        let isAway = summary.contains("(Away)") ? true : (summary.contains("(Home)") || location.lowercased().contains("oakwood")) ? false : true
+        let teamName = calendar.name
+            .replacingOccurrences(of: " \(calendar.sport)", with: "")
+            .replacingOccurrences(of: calendar.sport, with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return SportsEvent(
+            id: uid, title: summary, date: date,
+            startTime: timeFormatter.string(from: date),
+            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
+            location: location, isAway: isAway, isCancelled: isCancelled,
+            sportName: calendar.sport, teamName: teamName
+        )
+    }
+
+    func parseCalendarSchoolEvents(_ ics: String) -> [SchoolEvent] {
+        return parseICalRecords(ics).compactMap { createSchoolEvent(from: $0) }
+    }
+
+    func createSchoolEvent(from data: [String: String]) -> SchoolEvent? {
+        guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
+        if summary.range(of: "^(HS|LS|MS)\\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$", options: .regularExpression) != nil { return nil }
+        if summary.range(of: "\\bvs\\b", options: [.regularExpression, .caseInsensitive]) != nil { return nil }
+        let date = parseICalDate(dtstart)
+        let endDate = data["DTEND"].flatMap { parseICalDate($0) }
+        let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
+        let description = data["DESCRIPTION"]?.replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\,", with: ",") ?? ""
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        return SchoolEvent(
+            id: uid, title: summary, date: date,
+            startTime: timeFormatter.string(from: date),
+            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
+            location: location, description: description
+        )
+    }
+
+    func parseICalRecords(_ ics: String) -> [[String: String]] {
+        let unfolded = ics
+            .replacingOccurrences(of: "\r\n ", with: "")
+            .replacingOccurrences(of: "\r\n\t", with: "")
+            .replacingOccurrences(of: "\n ", with: "")
+            .replacingOccurrences(of: "\n\t", with: "")
+        var records: [[String: String]] = []
+        var current: [String: String] = [:]
+        var inEvent = false
+        for line in unfolded.components(separatedBy: .newlines) {
+            let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if l == "BEGIN:VEVENT" { inEvent = true; current = [:] }
+            else if l == "END:VEVENT" { records.append(current); inEvent = false }
+            else if inEvent, let idx = l.firstIndex(of: ":") {
+                let key = String(l[..<idx]).components(separatedBy: ";").first ?? ""
+                current[key] = String(l[l.index(after: idx)...])
+            }
+        }
+        return records
+    }
+
+    func parseICalDate(_ str: String) -> Date {
+        let formats: [(String, TimeZone?)] = [
+            ("yyyyMMdd'T'HHmmss'Z'", TimeZone(identifier: "UTC")),
+            ("yyyyMMdd'T'HHmmss", nil),
+            ("yyyyMMdd", nil)
+        ]
+        for (format, tz) in formats {
+            let f = DateFormatter()
+            f.dateFormat = format
+            if let tz = tz { f.timeZone = tz }
+            if let d = f.date(from: str) { return d }
+        }
+        return Date()
     }
 
     func loadResourceAssignmentIds() async {

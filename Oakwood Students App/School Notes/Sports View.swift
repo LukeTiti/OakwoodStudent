@@ -445,10 +445,6 @@ struct CalendarFilterView: View {
 // MARK: - Calendar View
 struct CalendarView: View {
     @EnvironmentObject var appInfo: AppInfo
-    @State private var items: [CalendarItem] = []
-    @State private var scores: [String: GameScore] = [:]
-    @State private var mySignups: [String: [ScoreboardSignup]] = [:]
-    @State private var isLoading = true
     @State private var selectedTab = 0
     @State private var showingFilter = false
     @State private var selectedCategories: Set<String> = {
@@ -458,12 +454,12 @@ struct CalendarView: View {
     }()
 
     var allCategories: [String] {
-        Array(Set(items.map { $0.category })).sorted()
+        Array(Set(appInfo.calendarItems.map { $0.category })).sorted()
     }
 
     var filteredItems: [CalendarItem] {
         let today = Calendar.current.startOfDay(for: Date())
-        var filtered = selectedCategories.isEmpty ? items : items.filter { selectedCategories.contains($0.category) }
+        var filtered = selectedCategories.isEmpty ? appInfo.calendarItems : appInfo.calendarItems.filter { selectedCategories.contains($0.category) }
         filtered = selectedTab == 0 ? filtered.filter { $0.date >= today } : filtered.filter { $0.date < today }
         return filtered
     }
@@ -486,7 +482,7 @@ struct CalendarView: View {
                 .pickerStyle(.segmented)
                 .padding()
 
-                if isLoading {
+                if appInfo.calendarIsLoading {
                     Spacer(); ProgressView("Loading events..."); Spacer()
                 } else if filteredItems.isEmpty {
                     Spacer(); Text(selectedTab == 0 ? "No upcoming events" : "No past events").foregroundColor(.secondary); Spacer()
@@ -498,7 +494,7 @@ struct CalendarView: View {
                                     switch item {
                                     case .sports(let event):
                                         NavigationLink(destination: GameDetailView(event: event)) {
-                                            SportsEventRow(event: event, score: scores[event.id], mySignups: mySignups[event.id] ?? [])
+                                            SportsEventRow(event: event, score: appInfo.calendarScores[event.id], mySignups: appInfo.calendarMySignups[event.id] ?? [])
                                         }
                                     case .school(let event):
                                         NavigationLink(destination: SchoolEventDetailView(event: event)) {
@@ -520,7 +516,7 @@ struct CalendarView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { isLoading = true; await loadAllEvents() } } label: {
+                    Button { Task { await appInfo.loadAllCalendarEvents() } } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
@@ -535,177 +531,8 @@ struct CalendarView: View {
             }
         }
         .onAppear {
-            if items.isEmpty { Task { await loadAllEvents() } }
-            else { Task { await refreshScores() } }
+            if appInfo.calendarItems.isEmpty { Task { await appInfo.loadAllCalendarEvents() } }
+            else { Task { await appInfo.refreshCalendarData() } }
         }
-    }
-
-    // MARK: - Data Loading
-
-    func loadAllEvents() async {
-        async let sportsTask = loadSportsEvents()
-        async let schoolTask = loadSchoolEvents()
-
-        let (sports, school) = await (sportsTask, schoolTask)
-
-        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) }
-        var seen = Set<String>()
-        let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
-        let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
-        await loadMySignups()
-
-        await MainActor.run {
-            items = unique
-            scores = fetchedScores
-            isLoading = false
-        }
-    }
-
-    func loadSportsEvents() async -> [SportsEvent] {
-        var allEvents: [SportsEvent] = []
-        await withTaskGroup(of: [SportsEvent].self) { group in
-            for calendar in teamCalendars {
-                group.addTask { await fetchSportsEvents(from: calendar) }
-            }
-            for await events in group { allEvents.append(contentsOf: events) }
-        }
-        return allEvents
-    }
-
-    func loadSchoolEvents() async -> [SchoolEvent] {
-        guard !schoolEventsCalendarURL.isEmpty,
-              let url = URL(string: schoolEventsCalendarURL),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let ics = String(data: data, encoding: .utf8) else { return [] }
-        return parseSchoolEvents(ics)
-    }
-
-    func refreshScores() async {
-        async let scoresTask = FirebaseService.shared.fetchAllGameScores()
-        await loadMySignups()
-        scores = (try? await scoresTask) ?? [:]
-    }
-
-    func loadMySignups() async {
-        let email = appInfo.googleVM.userEmail
-        guard !email.isEmpty else { return }
-        let signups = (try? await FirebaseService.shared.fetchMySignups(userEmail: email)) ?? []
-        let grouped = Dictionary(grouping: signups) { $0.eventId }
-        await MainActor.run { mySignups = grouped }
-    }
-
-    // MARK: - Sports iCal Parsing
-
-    func fetchSportsEvents(from calendar: TeamCalendar) async -> [SportsEvent] {
-        guard let url = URL(string: calendar.url),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let ics = String(data: data, encoding: .utf8) else { return [] }
-        return parseSportsICalEvents(ics, calendar: calendar)
-    }
-
-    func parseSportsICalEvents(_ ics: String, calendar: TeamCalendar) -> [SportsEvent] {
-        let records = parseICalRecords(ics)
-        return records.compactMap { createSportsEvent(from: $0, calendar: calendar) }
-    }
-
-    func createSportsEvent(from data: [String: String], calendar: TeamCalendar) -> SportsEvent? {
-        guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
-
-        let date = parseDate(dtstart)
-        let endDate = data["DTEND"].flatMap { parseDate($0) }
-        let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
-
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "h:mm a"
-
-        let isCancelled = summary.contains("CANCELLED") || data["STATUS"] == "CANCELLED"
-        let isAway = summary.contains("(Away)") ? true : (summary.contains("(Home)") || location.lowercased().contains("oakwood")) ? false : true
-
-        let teamName = calendar.name
-            .replacingOccurrences(of: " \(calendar.sport)", with: "")
-            .replacingOccurrences(of: calendar.sport, with: "")
-            .trimmingCharacters(in: .whitespaces)
-
-        return SportsEvent(
-            id: uid, title: summary, date: date,
-            startTime: timeFormatter.string(from: date),
-            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
-            location: location, isAway: isAway, isCancelled: isCancelled,
-            sportName: calendar.sport, teamName: teamName
-        )
-    }
-
-    // MARK: - School Event iCal Parsing
-
-    func parseSchoolEvents(_ ics: String) -> [SchoolEvent] {
-        let records = parseICalRecords(ics)
-        return records.compactMap { createSchoolEvent(from: $0) }
-    }
-
-    func createSchoolEvent(from data: [String: String]) -> SchoolEvent? {
-        guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
-
-        // Skip daily schedule markers like "HS Tuesday", "LS Monday", "MS Friday"
-        if summary.range(of: "^(HS|LS|MS)\\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$", options: .regularExpression) != nil {
-            return nil
-        }
-
-        // Skip sports matchups - these are duplicates of the team calendar events
-        if summary.range(of: "\\bvs\\b", options: [.regularExpression, .caseInsensitive]) != nil {
-            return nil
-        }
-
-        let date = parseDate(dtstart)
-        let endDate = data["DTEND"].flatMap { parseDate($0) }
-        let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
-        let description = data["DESCRIPTION"]?.replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\,", with: ",") ?? ""
-
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "h:mm a"
-
-        return SchoolEvent(
-            id: uid, title: summary, date: date,
-            startTime: timeFormatter.string(from: date),
-            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
-            location: location, description: description
-        )
-    }
-
-    // MARK: - Shared iCal Helpers
-
-    func parseICalRecords(_ ics: String) -> [[String: String]] {
-        let unfolded = ics
-            .replacingOccurrences(of: "\r\n ", with: "")
-            .replacingOccurrences(of: "\r\n\t", with: "")
-            .replacingOccurrences(of: "\n ", with: "")
-            .replacingOccurrences(of: "\n\t", with: "")
-
-        var records: [[String: String]] = []
-        var current: [String: String] = [:]
-        var inEvent = false
-
-        for line in unfolded.components(separatedBy: .newlines) {
-            let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
-            if l == "BEGIN:VEVENT" { inEvent = true; current = [:] }
-            else if l == "END:VEVENT" {
-                records.append(current)
-                inEvent = false
-            } else if inEvent, let idx = l.firstIndex(of: ":") {
-                let key = String(l[..<idx]).components(separatedBy: ";").first ?? ""
-                current[key] = String(l[l.index(after: idx)...])
-            }
-        }
-        return records
-    }
-
-    func parseDate(_ str: String) -> Date {
-        let formats = [("yyyyMMdd'T'HHmmss'Z'", TimeZone(identifier: "UTC")), ("yyyyMMdd'T'HHmmss", nil), ("yyyyMMdd", nil)]
-        for (format, tz) in formats {
-            let f = DateFormatter()
-            f.dateFormat = format
-            if let tz = tz { f.timeZone = tz }
-            if let d = f.date(from: str) { return d }
-        }
-        return Date()
     }
 }

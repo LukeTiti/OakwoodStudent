@@ -9,6 +9,64 @@ import SwiftSoup
 import Combine
 import WebKit
 
+// MARK: - Image Cache
+
+private class ImageDataCache {
+    static let shared = ImageDataCache()
+    private let cache = NSCache<NSString, NSData>()
+    func data(for url: String) -> Data? { cache.object(forKey: url as NSString) as Data? }
+    func store(_ data: Data, for url: String) { cache.setObject(data as NSData, forKey: url as NSString) }
+}
+
+struct CachedAsyncImage<Content: View, Placeholder: View>: View {
+    let url: URL?
+    @ViewBuilder let content: (Image) -> Content
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    @State private var imageData: Data?
+
+    init(url: URL?, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+        self.url = url
+        self.content = content
+        self.placeholder = placeholder
+        if let url = url, let cached = ImageDataCache.shared.data(for: url.absoluteString) {
+            _imageData = State(initialValue: cached)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let data = imageData, let image = makeImage(from: data) {
+                content(image)
+            } else {
+                placeholder()
+                    .task { await load() }
+            }
+        }
+    }
+
+    private func makeImage(from data: Data) -> Image? {
+        #if os(iOS)
+        guard let ui = UIImage(data: data) else { return nil }
+        return Image(uiImage: ui)
+        #else
+        guard let ns = NSImage(data: data) else { return nil }
+        return Image(nsImage: ns)
+        #endif
+    }
+
+    private func load() async {
+        guard let url = url else { return }
+        let key = url.absoluteString
+        if let cached = ImageDataCache.shared.data(for: key) {
+            imageData = cached; return
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        ImageDataCache.shared.store(data, for: key)
+        await MainActor.run { imageData = data }
+    }
+}
+
 struct ScoopItem: Identifiable {
     let id = UUID()
     let title: String
@@ -143,7 +201,7 @@ struct HomeView: View {
                     ForEach(viewModel.items) { item in
                         NavigationLink(destination: EventView(events: item)) {
                             VStack(alignment: .leading, spacing: 0) {
-                                AsyncImage(url: URL(string: item.image)) { image in
+                                CachedAsyncImage(url: URL(string: item.image)) { image in
                                     image
                                         .resizable()
                                         .scaledToFill()
@@ -179,7 +237,7 @@ struct HomeView: View {
             List(viewModel.items) { item in
                 NavigationLink(destination: EventView(events: item)) {
                     HStack() {
-                        AsyncImage(url: URL(string: item.image)) { image in
+                        CachedAsyncImage(url: URL(string: item.image)) { image in
                             image
                                 .resizable()
                                 .scaledToFit()

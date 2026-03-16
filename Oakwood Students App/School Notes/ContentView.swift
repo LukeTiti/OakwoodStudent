@@ -90,6 +90,7 @@ struct ContentView: View {
         TabView {
             Tab("Inside Scoop", systemImage: "newspaper") {
                 HomeView()
+                    .onAppear { appInfo.preloadAll() }
             }
             Tab("To Do", systemImage: "list.bullet") {
                 ToDoPage()
