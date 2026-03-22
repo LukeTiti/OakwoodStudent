@@ -42,7 +42,7 @@ class AppInfo: ObservableObject {
     }
     private var nextCustomId: Int = -1
     @Published var info: [Int: Bool] = [:] {
-        didSet {
+        didSet {    
             saveAssignmentInfo()
         }
     }

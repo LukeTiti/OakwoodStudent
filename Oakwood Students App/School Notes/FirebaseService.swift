@@ -123,6 +123,12 @@ struct SubmittedForm: Identifiable {
     var services: [LocalService]
 }
 
+// MARK: - App Banner
+struct AppBanner {
+    var message: String
+    var type: String   // "info" | "warning" | "urgent"
+}
+
 // MARK: - Game Score
 struct GameScore: Identifiable {
     var id: String
@@ -424,5 +430,18 @@ extension FirebaseService {
 
     func deleteResource(documentId: String) async throws {
         try await db.collection("assignmentResources").document(documentId).delete()
+    }
+
+    // MARK: - App Banner
+
+    func fetchBanners() async throws -> [AppBanner] {
+        let snapshot = try await db.collection("appConfig")
+            .whereField("isActive", isEqualTo: true)
+            .getDocuments()
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let message = data["message"] as? String, !message.isEmpty else { return nil }
+            return AppBanner(message: message, type: data["type"] as? String ?? "info")
+        }
     }
 }

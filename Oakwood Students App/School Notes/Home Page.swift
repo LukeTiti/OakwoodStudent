@@ -174,10 +174,65 @@ class ScoopViewModel: ObservableObject {
 
 }
 
+// MARK: - Banner View
+
+struct BannerView: View {
+    let banner: AppBanner
+    let onDismiss: () -> Void
+
+    var bannerColor: Color {
+        switch banner.type {
+        case "warning": return .orange
+        case "urgent":  return .red
+        default:        return .blue
+        }
+    }
+
+    var bannerIcon: String {
+        switch banner.type {
+        case "warning": return "exclamationmark.triangle.fill"
+        case "urgent":  return "exclamationmark.circle.fill"
+        default:        return "info.circle.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: bannerIcon)
+                .foregroundColor(.white)
+                .font(.footnote.weight(.semibold))
+                .frame(width: 22, height: 22)
+                .background(bannerColor)
+                .clipShape(Circle())
+            Text(banner.message)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button { onDismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.body)
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(bannerColor.opacity(0.4), lineWidth: 1.5))
+        .shadow(color: bannerColor.opacity(0.15), radius: 6, y: 2)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+    }
+}
+
 struct HomeView: View {
     @StateObject private var viewModel = ScoopViewModel()
-    // Use a valid default that matches a Picker tag. "" can represent "All".
     @State private var tag: String = ""
+    @State private var banners: [AppBanner] = []
+    @State private var dismissedBanners: Set<String> = []
 
     @ToolbarContentBuilder
     var scoopToolbar: some ToolbarContent {
@@ -190,6 +245,18 @@ struct HomeView: View {
             }
             .pickerStyle(.menu)
             .frame(width: tag == "" ? 110 : tag == "176" ? 125 : 140)
+        }
+    }
+
+    @ViewBuilder
+    var bannerOverlay: some View {
+        let visible = banners.filter { !dismissedBanners.contains($0.message) }
+        if !visible.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(visible, id: \.message) { banner in
+                    BannerView(banner: banner) { dismissedBanners.insert(banner.message) }
+                }
+            }
         }
     }
 
@@ -232,35 +299,61 @@ struct HomeView: View {
             .navigationTitle("Inside Scoop")
             .toolbar { scoopToolbar }
             .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
-            .onAppear { viewModel.fetchScoop(tag: tag) }
+            .onAppear {
+                viewModel.fetchScoop(tag: tag)
+                Task {
+                    banners = (try? await FirebaseService.shared.fetchBanners()) ?? []
+                    dismissedBanners = []
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) { bannerOverlay }
             #else
-            List(viewModel.items) { item in
-                NavigationLink(destination: EventView(events: item)) {
-                    HStack() {
-                        CachedAsyncImage(url: URL(string: item.image)) { image in
-                            image
-                                .resizable()
-                                .scaledToFit()
-                        } placeholder: {
-                            ProgressView()
-                        }
-                            .frame(width: 100, height: 100)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        Text(item.title)
-                            .font(.headline)
-                        if !item.date.isEmpty {
-                            Text(item.date)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+            List {
+                let visible = banners.filter { !dismissedBanners.contains($0.message) }
+                if !visible.isEmpty {
+                    Section {
+                        ForEach(visible, id: \.message) { banner in
+                            BannerView(banner: banner) { dismissedBanners.insert(banner.message) }
+                                .listRowInsets(EdgeInsets())
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                         }
                     }
-                    .padding(.vertical, 4)
+                }
+                ForEach(viewModel.items) { item in
+                    NavigationLink(destination: EventView(events: item)) {
+                        HStack() {
+                            CachedAsyncImage(url: URL(string: item.image)) { image in
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                            } placeholder: {
+                                ProgressView()
+                            }
+                                .frame(width: 100, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text(item.title)
+                                .font(.headline)
+                            if !item.date.isEmpty {
+                                Text(item.date)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
             }
             .navigationTitle("Inside Scoop")
             .toolbar { scoopToolbar }
             .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
-            .onAppear { viewModel.fetchScoop(tag: tag) }
+            .onAppear {
+                viewModel.fetchScoop(tag: tag)
+                Task {
+                    banners = (try? await FirebaseService.shared.fetchBanners()) ?? []
+                    dismissedBanners = []
+                }
+            }
             #endif
         }
     }
