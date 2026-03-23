@@ -12,43 +12,28 @@ struct ToDoPage: View {
     @State private var showAll = false
     @EnvironmentObject var appInfo: AppInfo
 
-    private var filteredAssignments: [(assignment: Assignment, courseName: String)] {
+    private var allPairs: [(assignment: Assignment, courseName: String)] {
         let veracross = appInfo.courses.flatMap { course in
-            (course.assignments ?? [])
-                .filter { showAll || appInfo.info[$0.score_id, default: false] == false }
-                .map { ($0, course.class_name) }
+            (course.assignments ?? []).map { ($0, course.class_name) }
         }
-        let custom = appInfo.customAssignments
-            .filter { showAll || appInfo.info[$0.score_id, default: false] == false }
-            .map { ($0, $0.customCourseName ?? "Custom") }
+        let custom = appInfo.customAssignments.map { ($0, $0.customCourseName ?? "Custom") }
         return veracross + custom
+    }
+
+    private var filteredAssignments: [(assignment: Assignment, courseName: String)] {
+        showAll ? allPairs : allPairs.filter { appInfo.info[$0.assignment.score_id, default: false] == false }
     }
 
     private func assignmentsDue(dayOffset: Int) -> [(assignment: Assignment, courseName: String)] {
         guard let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) else { return [] }
-        return filteredAssignments.filter { item in
-            guard let dueDate = item.assignment.dueDate else { return false }
-            return Calendar.current.isDate(dueDate, inSameDayAs: targetDate)
-        }
+        return filteredAssignments.filter { Calendar.current.isDate($0.assignment.dueDate ?? .distantFuture, inSameDayAs: targetDate) }
     }
 
     private var pastDueAssignments: [(assignment: Assignment, courseName: String)] {
         let startOfToday = Calendar.current.startOfDay(for: Date())
-        let allSources: [(assignment: Assignment, courseName: String)] = {
-            let veracross = appInfo.courses.flatMap { course in
-                (course.assignments ?? [])
-                    .filter { appInfo.info[$0.score_id, default: false] == false }
-                    .map { ($0, course.class_name) }
-            }
-            let custom = appInfo.customAssignments
-                .filter { appInfo.info[$0.score_id, default: false] == false }
-                .map { ($0, $0.customCourseName ?? "Custom") }
-            return veracross + custom
-        }()
-        return allSources.filter { item in
-            guard let dueDate = item.assignment.dueDate else { return false }
-            return dueDate < startOfToday
-        }
+        return allPairs
+            .filter { appInfo.info[$0.assignment.score_id, default: false] == false }
+            .filter { ($0.assignment.dueDate ?? .distantFuture) < startOfToday }
     }
 
     private func sectionHeader(for dayOffset: Int) -> String {
@@ -56,10 +41,8 @@ struct ToDoPage: View {
         case 0: return "Today's Assignments"
         case 1: return "Tomorrow's Assignments"
         default:
-            if let day = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) {
-                return day.formatted(.dateTime.weekday(.wide))
-            }
-            return ""
+            return Calendar.current.date(byAdding: .day, value: dayOffset, to: Date())
+                .map { $0.formatted(.dateTime.weekday(.wide)) } ?? ""
         }
     }
 
@@ -278,7 +261,7 @@ struct AssignmentDetailView: View {
 
             if let notes = assignment.assignment_notes, !notes.isEmpty {
                 Section("Notes") {
-                    Text(notes)
+                    Text(linkedAttributedString(from: notes))
                         .font(.body)
                 }
             }
@@ -385,6 +368,24 @@ struct AssignmentDetailView: View {
             }
         }
     }
+}
+
+// MARK: - Link Detection
+
+private func linkedAttributedString(from text: String) -> AttributedString {
+    var attributed = AttributedString(text)
+    guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+        return attributed
+    }
+    let matches = detector.matches(in: text, range: NSRange(text.startIndex..., in: text))
+    for match in matches {
+        guard let url = match.url,
+              let range = Range(match.range, in: text),
+              let attrRange = Range(range, in: attributed) else { continue }
+        attributed[attrRange].link = url
+        attributed[attrRange].foregroundColor = .blue
+    }
+    return attributed
 }
 
 // MARK: - Resource Helpers

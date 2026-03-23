@@ -228,11 +228,61 @@ struct BannerView: View {
     }
 }
 
+struct ScoopRow: View {
+    let item: ScoopItem
+    var showBadge: Bool = false
+
+    var body: some View {
+        HStack {
+            CachedAsyncImage(url: URL(string: item.image)) { image in
+                image.resizable().scaledToFit()
+            } placeholder: {
+                ProgressView()
+            }
+            .frame(width: 100, height: 100)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                if showBadge {
+                    Text("Happening Today")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.green.opacity(0.15))
+                        .foregroundColor(.green)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct HomeView: View {
     @StateObject private var viewModel = ScoopViewModel()
     @State private var tag: String = ""
     @State private var banners: [AppBanner] = []
     @State private var dismissedBanners: Set<String> = []
+
+    private func hasTodayDate(in title: String) -> Bool {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return false }
+        let matches = detector.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        let now = Date()
+        return matches.contains { match in
+            guard let start = match.date else { return false }
+            if match.duration > 0 {
+                return now >= start && now <= start.addingTimeInterval(match.duration)
+            }
+            return Calendar.current.isDateInToday(start)
+        }
+    }
+
+    private var todayItems: [ScoopItem] { viewModel.items.filter { hasTodayDate(in: $0.title) } }
+    private var otherItems: [ScoopItem] { viewModel.items.filter { !hasTodayDate(in: $0.title) } }
 
     @ToolbarContentBuilder
     var scoopToolbar: some ToolbarContent {
@@ -320,27 +370,9 @@ struct HomeView: View {
                         }
                     }
                 }
-                ForEach(viewModel.items) { item in
+                ForEach(todayItems + otherItems) { item in
                     NavigationLink(destination: EventView(events: item)) {
-                        HStack() {
-                            CachedAsyncImage(url: URL(string: item.image)) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                            } placeholder: {
-                                ProgressView()
-                            }
-                                .frame(width: 100, height: 100)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                            Text(item.title)
-                                .font(.headline)
-                            if !item.date.isEmpty {
-                                Text(item.date)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
+                        ScoopRow(item: item, showBadge: hasTodayDate(in: item.title))
                     }
                 }
             }

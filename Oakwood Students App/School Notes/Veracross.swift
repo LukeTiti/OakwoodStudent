@@ -124,58 +124,58 @@ struct VeracrossGradesView: View {
                 .navigationTitle("Login to Veracross")
             case .loggedIn:
                 List {
-                        if let errorMessage = errorMessage {
-                            Text("⚠️ \(errorMessage)")
-                                .foregroundColor(.red)
-                        }
-                        ForEach(appInfo.courses) { course in
-                            let unreadCount = (course.assignments ?? []).filter { $0.is_unread == 1 }.count
-                            NavigationLink(destination: CourseView(course: course)) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(course.class_name)
-                                            .font(.headline)
-                                            .lineLimit(2)
-                                        if unreadCount > 0 {
-                                            Text("\(unreadCount) unread assignment\(unreadCount == 1 ? "" : "s")")
-                                                .font(.caption)
-                                                .foregroundColor(.orange)
-                                        }
-                                    }
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        if let letter = course.ptd_letter_grade {
-                                            Text(letter.trimmingCharacters(in: .whitespaces))
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(gradeColor(for: course.ptd_grade))
-                                        }
-                                        if let grade = course.ptd_grade {
-                                            Text("\(grade)%")
-                                                .font(.caption)
-                                                .foregroundColor(gradeColor(for: grade))
-                                        }
+                    if let errorMessage = errorMessage {
+                        Text("⚠️ \(errorMessage)")
+                            .foregroundColor(.red)
+                    }
+                    ForEach(appInfo.courses) { course in
+                        let unreadCount = (course.assignments ?? []).filter { $0.is_unread == 1 }.count
+                        NavigationLink(destination: CourseView(course: course)) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(course.class_name)
+                                        .font(.headline)
+                                        .lineLimit(2)
+                                    if unreadCount > 0 {
+                                        Text("\(unreadCount) unread assignment\(unreadCount == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundColor(.orange)
                                     }
                                 }
-                                .padding(.vertical, 4)
-                                .macRowPadding()
-                            }
-                        }
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button {
-                                Task {
-                                    await loadGrades()
-                                    await appInfo.captureCurrentCookies()
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    if let letter = course.ptd_letter_grade {
+                                        Text(letter.trimmingCharacters(in: .whitespaces))
+                                            .font(.title3)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(gradeColor(for: course.ptd_grade))
+                                    }
+                                    if let grade = course.ptd_grade {
+                                        Text("\(grade)%")
+                                            .font(.caption)
+                                            .foregroundColor(gradeColor(for: grade))
+                                    }
                                 }
-                            } label: {
-                                Label("Refresh", systemImage: "arrow.clockwise")
                             }
+                            .padding(.vertical, 4)
+                            .macRowPadding()
                         }
                     }
-                    .navigationTitle("Grades")
-                    .macInsetListStyle()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            Task {
+                                await loadGrades()
+                                await appInfo.captureCurrentCookies()
+                            }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                }
+                .navigationTitle("Grades")
+                .macInsetListStyle()
             }
         }
         .onAppear {
@@ -386,9 +386,7 @@ struct GradeChartView: View {
     var body: some View {
         let minY = (points.map(\.percent).min() ?? 50) - 2
         let maxY = (points.map(\.percent).max() ?? 100) + 2
-        let semStart = Calendar.current.date(from: DateComponents(
-            year: Calendar.current.component(.year, from: Date()), month: 1, day: 1
-        ))!
+        let semStart = Calendar.current.date(from: DateComponents(year: Calendar.current.component(.year, from: Date()), month: 1, day: 1))!
 
         Chart {
             RuleMark(x: .value("Semester", semStart))
@@ -511,50 +509,38 @@ class VeracrossLoginCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
 
 #if os(iOS)
 struct VeracrossLoginView: UIViewRepresentable {
-    let url: URL
-    var onLogin: () -> Void
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.load(URLRequest(url: url))
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    let url: URL; var onLogin: () -> Void
     func makeCoordinator() -> VeracrossLoginCoordinator { VeracrossLoginCoordinator(onLogin: onLogin) }
+    func makeUIView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 #elseif os(macOS)
 struct VeracrossLoginView: NSViewRepresentable {
-    let url: URL
-    var onLogin: () -> Void
+    let url: URL; var onLogin: () -> Void
+    func makeCoordinator() -> VeracrossLoginCoordinator { VeracrossLoginCoordinator(onLogin: onLogin) }
+    func makeNSView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+#endif
 
-    func makeNSView(context: Context) -> WKWebView {
+private extension VeracrossLoginView {
+    func makeWebView(coordinator: VeracrossLoginCoordinator) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
+        webView.navigationDelegate = coordinator
+        webView.uiDelegate = coordinator
         webView.load(URLRequest(url: url))
         return webView
     }
-
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
-    func makeCoordinator() -> VeracrossLoginCoordinator { VeracrossLoginCoordinator(onLogin: onLogin) }
 }
-#endif
 
 // MARK: - Grade Share Card
 struct GradeShareCard: View {
     let assignment: Assignment
     let courseName: String
 
-    private var hasGrade: Bool {
-        assignment.raw_score != nil && !(assignment.raw_score?.isEmpty ?? true)
-    }
+    private var hasGrade: Bool { assignment.gradePercent != nil }
 
     private var percent: Double {
         (assignment.gradePercent ?? 0) * 100
@@ -566,7 +552,6 @@ struct GradeShareCard: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Assignment name
             Text(assignment.assignment_description)
                 .font(.title3)
                 .fontWeight(.semibold)
@@ -575,7 +560,6 @@ struct GradeShareCard: View {
                 .multilineTextAlignment(.center)
 
             if hasGrade {
-                // Graded layout: score + percentage
                 VStack(spacing: 4) {
                     Text("\(assignment.raw_score ?? "--") / \(assignment.maximum_score ?? 0)")
                         .font(.system(size: 36, weight: .bold))
@@ -590,7 +574,6 @@ struct GradeShareCard: View {
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.8))
             } else {
-                // Reminder layout: big due date + notes preview
                 if let due = assignment.due_date, !due.isEmpty {
                     Text("Due \(due)")
                         .font(.system(size: 28, weight: .bold))
@@ -610,7 +593,6 @@ struct GradeShareCard: View {
                 }
             }
 
-            // Type badge
             HStack(spacing: 8) {
                 if let type = assignment.assignment_type, !type.isEmpty {
                     Text(type)
@@ -624,7 +606,6 @@ struct GradeShareCard: View {
             }
             .foregroundColor(.white.opacity(0.8))
 
-            // Branding
             Text("Oakwood Students")
                 .font(.caption2)
                 .foregroundColor(.white.opacity(0.5))
