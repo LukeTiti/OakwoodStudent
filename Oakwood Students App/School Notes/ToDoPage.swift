@@ -78,7 +78,7 @@ struct ToDoPage: View {
             .navigationTitle("To Do")
             .macInsetListStyle()
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button {
                         withAnimation { showAll.toggle() }
                     } label: {
