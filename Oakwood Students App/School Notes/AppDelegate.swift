@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import GoogleSignIn
 import FirebaseCore
+import FirebaseMessaging
 
 #if os(iOS)
 import BackgroundTasks
@@ -23,8 +24,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Set notification delegate to show alerts while app is open
         UNUserNotificationCenter.current().delegate = self
 
-        // Request notification permission
+        // Configure FCM token manager
+        PushNotificationManager.shared.configure()
+
+        // Request notification permission and register for remote notifications
         GradeNotificationService.shared.requestNotificationPermission()
+        application.registerForRemoteNotifications()
 
         // Register background task
         BGTaskScheduler.shared.register(
@@ -35,6 +40,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         return true
+    }
+
+    // Pass the APNs device token to Firebase so it can generate an FCM token
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+        // Now that APNs token is set, retry topic subscription
+        PushNotificationManager.shared.subscribeToTopics()
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Failed to register for remote notifications: \(error)")
     }
 
     // Show notifications even when app is in foreground

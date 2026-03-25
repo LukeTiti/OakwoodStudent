@@ -3,162 +3,488 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Hours - Advisor Portal</title>
+    <title>Oakwood Advisor Portal</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
-        h1 { margin-bottom: 20px; color: #333; }
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-        .tab { padding: 10px 20px; background: #ddd; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
-        .tab.active { background: #007AFF; color: white; }
-        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .form-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-        .student-name { font-size: 16px; font-weight: 500; color: #555; }
-        .hours { font-size: 24px; font-weight: 700; color: #007AFF; }
-        .date { color: #888; font-size: 14px; }
-        .section { margin-top: 15px; }
-        .section-title { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
-        .reflection { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; }
-        .entry { padding: 8px 0; border-bottom: 1px solid #eee; }
-        .entry:last-child { border-bottom: none; }
-        .entry-notes { font-weight: 500; }
-        .entry-details { font-size: 13px; color: #666; }
-        .buttons { display: flex; gap: 10px; margin-top: 20px; }
-        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
-        .btn-approve { background: #34C759; color: white; }
-        .btn-reject { background: #FF3B30; color: white; }
-        .btn:hover { opacity: 0.9; }
-        .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-        .status-pending { background: #FF9500; color: white; }
-        .status-approved { background: #34C759; color: white; }
-        .status-rejected { background: #FF3B30; color: white; }
-        .empty { text-align: center; padding: 40px; color: #888; }
-        .tax-id { background: #e8f4fd; padding: 8px 12px; border-radius: 6px; font-size: 14px; margin-top: 10px; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f4f0;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #2d6a2d;
+            color: white;
+            padding: 16px 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        header h1 { font-size: 20px; font-weight: 700; }
+        header span { font-size: 13px; opacity: 0.75; }
+
+        .tab-bar {
+            background: white;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            padding: 0 24px;
+        }
+        .tab {
+            padding: 13px 20px;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -1px;
+        }
+        .tab.active { color: #2d6a2d; border-bottom-color: #2d6a2d; }
+        .tab:hover:not(.active) { color: #333; }
+
+        .content { padding: 20px; max-width: 900px; margin: 0 auto; }
+        .section { display: none; }
+        .section.active { display: block; }
+
+        /* Sub-tabs */
+        .sub-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .sub-tab { padding: 7px 14px; background: #e8e8e8; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .sub-tab.active { background: #2d6a2d; color: white; }
+
+        /* Service hours cards */
+        .card { background: white; border-radius: 10px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .card-title { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+        .card-sub { font-size: 13px; color: #555; }
+        .card-date { font-size: 12px; color: #888; margin-top: 2px; }
+        .hours { font-size: 20px; font-weight: 700; color: #2d6a2d; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+        .badge-pending  { background: #fff3cd; color: #856404; }
+        .badge-approved { background: #d4edda; color: #155724; }
+        .badge-rejected { background: #f8d7da; color: #721c24; }
+        .badge-info     { background: #d1ecf1; color: #0c5460; }
+        .badge-warning  { background: #fff3cd; color: #856404; }
+        .badge-urgent   { background: #f8d7da; color: #721c24; }
+        .badge-basketball { background: #e3f0ff; color: #1a56a0; }
+        .badge-volleyball { background: #f0e6ff; color: #6b21a8; }
+
+        .section-label { font-size: 11px; text-transform: uppercase; color: #888; font-weight: 600; letter-spacing: 0.5px; margin: 10px 0 5px; }
+        .reflection, .entry { background: #f8f9f8; border-radius: 6px; padding: 8px 10px; margin-bottom: 5px; font-size: 13px; }
+        .entry-detail { font-size: 12px; color: #666; margin-top: 1px; }
+        .tax-box { background: #eaf3ea; border-radius: 6px; padding: 7px 10px; font-size: 13px; margin-bottom: 8px; }
+
+        .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+        .btn { padding: 9px 18px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .btn:hover { opacity: 0.88; }
+        .btn-approve { background: #2d6a2d; color: white; }
+        .btn-reject  { background: #dc3545; color: white; }
+        .btn-primary { background: #2d6a2d; color: white; }
+        .btn-danger  { background: #dc3545; color: white; padding: 5px 12px; font-size: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+        .btn-danger:hover { opacity: 0.88; }
+
+        /* ── Sports ──────────────────────────────────────────── */
+        .games-list { display: flex; flex-direction: column; gap: 6px; }
+
+        .game-row {
+            background: white;
+            border-radius: 8px;
+            padding: 10px 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            border-left: 3px solid #2d6a2d;
+        }
+        .game-row.past { border-left-color: #bbb; opacity: 0.75; }
+
+        .game-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .game-date { font-size: 12px; color: #888; min-width: 60px; }
+        .game-title { font-size: 14px; font-weight: 600; flex: 1; }
+        .game-team  { font-size: 12px; color: #666; }
+
+        .slot-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 7px;
+        }
+        .slot-chip {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: #f0f4f0;
+        }
+        .slot-chip.filled { background: #d4edda; }
+        .slot-chip.open   { background: #f5f5f5; color: #bbb; font-style: italic; }
+        .slot-label { font-weight: 600; color: #444; }
+        .slot-label.open  { font-weight: 400; color: #bbb; }
+        .slot-name  { color: #222; }
+
+        .sport-filter { display: flex; gap: 8px; margin-bottom: 14px; }
+        .filter-btn { padding: 6px 14px; border: 1.5px solid #ddd; background: white; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; color: #555; }
+        .filter-btn.active { border-color: #2d6a2d; background: #eaf3ea; color: #2d6a2d; }
+
+        /* ── Banners ─────────────────────────────────────────── */
+        .banner-form { margin-bottom: 20px; }
+        .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 180px; }
+        .form-group label { font-size: 12px; font-weight: 600; color: #444; }
+        .form-group input, .form-group select {
+            padding: 9px 11px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none;
+        }
+        .form-group input:focus, .form-group select:focus { border-color: #2d6a2d; }
+
+        .banner-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 14px; background: white; border-radius: 8px; margin-bottom: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+        }
+
+        .empty { text-align: center; padding: 40px; color: #bbb; font-size: 14px; }
+        .loading { text-align: center; padding: 20px; color: #999; font-size: 13px; }
     </style>
 </head>
 <body>
-    <h1>Service Hours Approval</h1>
 
-    <div class="tabs">
-        <button class="tab active" onclick="filterByStatus('pending')">Pending</button>
-        <button class="tab" onclick="filterByStatus('approved')">Approved</button>
-        <button class="tab" onclick="filterByStatus('rejected')">Rejected</button>
-        <button class="tab" onclick="filterByStatus('all')">All</button>
+<header>
+    <h1>Oakwood Advisor Portal</h1>
+    <span>Faculty Dashboard</span>
+</header>
+
+<div class="tab-bar">
+    <button class="tab active" onclick="switchTab('service')">Service Hours</button>
+    <button class="tab" onclick="switchTab('sports')">Sports Signups</button>
+    <button class="tab" onclick="switchTab('banners')">Banners</button>
+</div>
+
+<div class="content">
+
+    <!-- SERVICE HOURS -->
+    <div id="section-service" class="section active">
+        <div class="sub-tabs">
+            <button class="sub-tab active" onclick="filterForms('pending', event)">Pending</button>
+            <button class="sub-tab" onclick="filterForms('approved', event)">Approved</button>
+            <button class="sub-tab" onclick="filterForms('rejected', event)">Rejected</button>
+            <button class="sub-tab" onclick="filterForms('all', event)">All</button>
+        </div>
+        <div id="forms-container"><div class="empty">Loading…</div></div>
     </div>
 
-    <div id="forms-container">
-        <div class="empty">Loading...</div>
+    <!-- SPORTS SIGNUPS -->
+    <div id="section-sports" class="section">
+        <div class="sport-filter">
+            <button class="filter-btn active" onclick="setSportFilter('all', this)">All</button>
+            <button class="filter-btn" onclick="setSportFilter('Basketball', this)">Basketball</button>
+            <button class="filter-btn" onclick="setSportFilter('Volleyball', this)">Volleyball</button>
+        </div>
+        <div id="sports-container"><div class="loading">Loading games…</div></div>
     </div>
 
-    <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
-        import { getFirestore, collection, query, orderBy, onSnapshot, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyCpw3Mo4A7eoA2heVDhdR1fPFXQkCbcW_E",
-            authDomain: "oakwoodstudents-d9495.firebaseapp.com",
-            projectId: "oakwoodstudents-d9495",
-            storageBucket: "oakwoodstudents-d9495.firebasestorage.app",
-            messagingSenderId: "566131280116",
-            appId: "1:566131280116:web:9a6a9f7765a82771deb6a1"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        let allForms = [];
-        let currentFilter = 'pending';
-
-        // Listen for real-time updates from Firestore
-        const q = query(collection(db, 'serviceForms'));
-        onSnapshot(q, (snapshot) => {
-            allForms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // Sort by date descending
-            allForms.sort((a, b) => b.submittedAt?.toDate() - a.submittedAt?.toDate());
-            renderForms();
-        });
-
-        // Filter forms by status
-        window.filterByStatus = function(status) {
-            currentFilter = status;
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
-            renderForms();
-        };
-
-        // Approve a form
-        window.approveForm = async function(formId) {
-            if (confirm('Approve this service hours submission?')) {
-                await updateDoc(doc(db, 'serviceForms', formId), { status: 'approved' });
-            }
-        };
-
-        // Reject a form
-        window.rejectForm = async function(formId) {
-            const reason = prompt('Reason for rejection (optional):');
-            if (reason !== null) {
-                await updateDoc(doc(db, 'serviceForms', formId), { status: 'rejected', rejectionReason: reason });
-            }
-        };
-
-        // Render forms to the page
-        function renderForms() {
-            const container = document.getElementById('forms-container');
-            let filtered = allForms;
-
-            if (currentFilter !== 'all') {
-                filtered = allForms.filter(f => f.status === currentFilter);
-            }
-
-            if (filtered.length === 0) {
-                container.innerHTML = '<div class="empty">No forms found</div>';
-                return;
-            }
-
-            container.innerHTML = filtered.map(form => `
-                <div class="card">
-                    <div class="card-header">
-                        <div>
-                            <div class="form-title">${form.title || 'Untitled'}</div>
-                            <div class="student-name">${form.studentName || 'Unknown Student'}</div>
-                            <div class="date">${form.submittedAt?.toDate().toLocaleDateString() || 'No date'}</div>
-                        </div>
-                        <div style="text-align: right;">
-                            <div class="hours">${form.totalHours || 0} hrs</div>
-                            <span class="status-badge status-${form.status}">${form.status}</span>
-                        </div>
-                    </div>
-
-                    ${form.taxID ? `<div class="tax-id"><strong>Tax ID:</strong> ${form.taxID}</div>` : ''}
-
-                    <div class="section">
-                        <div class="section-title">Reflections</div>
-                        ${form.reflection1 ? `<div class="reflection"><strong>1.</strong> ${form.reflection1}</div>` : ''}
-                        ${form.reflection2 ? `<div class="reflection"><strong>2.</strong> ${form.reflection2}</div>` : ''}
-                        ${form.reflection3 ? `<div class="reflection"><strong>3.</strong> ${form.reflection3}</div>` : ''}
-                    </div>
-
-                    <div class="section">
-                        <div class="section-title">Service Entries (${form.services?.length || 0})</div>
-                        ${(form.services || []).map(s => `
-                            <div class="entry">
-                                <div class="entry-notes">${s.notes}</div>
-                                <div class="entry-details">${s.date} • ${s.description} • ${s.hours} hrs</div>
-                            </div>
-                        `).join('')}
-                    </div>
-
-                    ${form.status === 'pending' ? `
-                        <div class="buttons">
-                            <button class="btn btn-approve" onclick="approveForm('${form.id}')">Approve</button>
-                            <button class="btn btn-reject" onclick="rejectForm('${form.id}')">Reject</button>
-                        </div>
-                    ` : ''}
+    <!-- BANNERS -->
+    <div id="section-banners" class="section">
+        <div class="card banner-form">
+            <div style="font-size:15px;font-weight:700;margin-bottom:12px">Post a Banner</div>
+            <div class="form-row">
+                <div class="form-group" style="flex:3">
+                    <label>Message</label>
+                    <input type="text" id="banner-message" placeholder="Enter banner message…">
                 </div>
-            `).join('');
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="banner-type">
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:none">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-primary" onclick="addBanner()">Post</button>
+                </div>
+            </div>
+        </div>
+        <div class="section-label">Active Banners</div>
+        <div id="banners-container"><div class="empty">No active banners</div></div>
+    </div>
+
+</div>
+
+<script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+    import { getFirestore, collection, query, where, onSnapshot, doc, addDoc, updateDoc }
+        from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+    const app = initializeApp({
+        apiKey: "AIzaSyCpw3Mo4A7eoA2heVDhdR1fPFXQkCbcW_E",
+        authDomain: "oakwoodstudents-d9495.firebaseapp.com",
+        projectId: "oakwoodstudents-d9495",
+        storageBucket: "oakwoodstudents-d9495.firebasestorage.app",
+        messagingSenderId: "566131280116",
+        appId: "1:566131280116:web:9a6a9f7765a82771deb6a1"
+    });
+    const db = getFirestore(app);
+
+    // ─── TAB SWITCHING ────────────────────────────────────────────────────────
+
+    window.switchTab = function(tab) {
+        document.querySelectorAll('.tab').forEach((t, i) =>
+            t.classList.toggle('active', ['service','sports','banners'][i] === tab));
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.getElementById('section-' + tab).classList.add('active');
+    };
+
+    // ─── SERVICE HOURS ────────────────────────────────────────────────────────
+
+    let allForms = [], currentFilter = 'pending';
+
+    onSnapshot(query(collection(db, 'serviceForms')), snapshot => {
+        allForms = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => b.submittedAt?.toDate() - a.submittedAt?.toDate());
+        renderForms();
+    });
+
+    window.filterForms = function(status, e) {
+        currentFilter = status;
+        document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+        e.target.classList.add('active');
+        renderForms();
+    };
+
+    function renderForms() {
+        const container = document.getElementById('forms-container');
+        const filtered = currentFilter === 'all' ? allForms : allForms.filter(f => f.status === currentFilter);
+        if (!filtered.length) { container.innerHTML = '<div class="empty">No forms found</div>'; return; }
+
+        container.innerHTML = filtered.map(form => `
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">${form.title || 'Untitled'}</div>
+                        <div class="card-sub">${form.studentName || 'Unknown'}</div>
+                        <div class="card-date">${form.submittedAt?.toDate().toLocaleDateString() || ''}</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div class="hours">${form.totalHours || 0} hrs</div>
+                        <span class="badge badge-${form.status}">${form.status}</span>
+                    </div>
+                </div>
+                ${form.taxID ? `<div class="tax-box">Tax ID: <strong>${form.taxID}</strong></div>` : ''}
+                <div class="section-label">Reflections</div>
+                ${[form.reflection1, form.reflection2, form.reflection3].filter(Boolean)
+                    .map((r, i) => `<div class="reflection"><strong>${i+1}.</strong> ${r}</div>`).join('')}
+                <div class="section-label">Service Entries (${form.services?.length || 0})</div>
+                ${(form.services || []).map(s => `
+                    <div class="entry">
+                        <div>${s.notes}</div>
+                        <div class="entry-detail">${s.date} · ${s.description} · ${s.hours} hrs</div>
+                    </div>`).join('')}
+                ${form.status === 'pending' ? `
+                    <div class="btn-row">
+                        <button class="btn btn-approve" onclick="approveForm('${form.id}')">Approve</button>
+                        <button class="btn btn-reject" onclick="rejectForm('${form.id}')">Reject</button>
+                    </div>` : form.rejectionReason ? `
+                    <div style="margin-top:10px;font-size:12px;color:#888">Rejected: ${form.rejectionReason}</div>` : ''}
+            </div>`).join('');
+    }
+
+    window.approveForm = async id => {
+        if (confirm('Approve this submission?'))
+            await updateDoc(doc(db, 'serviceForms', id), { status: 'approved' });
+    };
+    window.rejectForm = async id => {
+        const reason = prompt('Reason for rejection (optional):');
+        if (reason !== null)
+            await updateDoc(doc(db, 'serviceForms', id), { status: 'rejected', rejectionReason: reason });
+    };
+
+    // ─── SPORTS ───────────────────────────────────────────────────────────────
+
+    const CALENDARS = [
+        { name: "Boys Varsity Basketball",    sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62364.ics?t=574b1058ac7e848e69b5c195b9c6871f&uid=C8955EBA-FBF4-4238-8DDC-0DA396078E59" },
+        { name: "Boys JV Basketball",         sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62363.ics?t=303205835d89ade46088c2300119db66&uid=1D83C67E-9040-4571-80D9-98149C09E69D" },
+        { name: "Boys Frosh Soph Basketball", sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62367.ics?t=8d80639ac7daddf28ba1022fc1c62d43&uid=BB6D0750-761D-496C-9F66-53202ADA8768" },
+        { name: "Girls Varsity Basketball",   sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62365.ics?t=a645614c28255fd1a77cd49d2583fa2e&uid=774F3AF9-254C-4F21-A394-C7065E4CB9DD" },
+        { name: "Girls MS Basketball",        sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62350.ics?t=0fb4aa784f5ce136fad43d1098aacb02&uid=35BBC154-5E77-4B89-97EA-72CADCE71393" },
+        { name: "6th/7th Boys Basketball Green", sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/63242.ics?t=36aae8274d21f8755a7d38e3c4249900&uid=7985C4FD-E314-4EB2-A10B-FD18F2D311B2" },
+        { name: "6th/7th Boys Basketball White", sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/63243.ics?t=454e358a2cb4605a1505ed552f177c06&uid=9F6AFF60-551E-4ED3-86A0-FC6AB2450296" },
+        { name: "Boys 6th Grade Basketball",  sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62349.ics?t=de6979a535d2fb6ef584ff2b76da567b&uid=44BE0855-1672-4EEC-992F-E807557165F1" },
+        { name: "Boys 7th Grade Basketball",  sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62351.ics?t=1f416c2e41299a4e91e71144bd86906a&uid=A64FC611-41E2-4CBF-A844-7CAC39748BAA" },
+        { name: "Boys 8th Grade Basketball",  sport: "Basketball", url: "https://api.veracross.com/oakwood/teams/62356.ics?t=6d306b7db8585e5a9dedec50f247327f&uid=E4C4FE65-57C3-4C15-B9FE-A25A64DCEF20" },
+        { name: "Boys Varsity Volleyball",    sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62376.ics?t=4a66d55576d26489cb6dec8a3356876a&uid=17FF6E41-7CE0-4E4B-9831-4F0075B51309" },
+        { name: "Boys JV Volleyball",         sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62369.ics?t=dc9b109f9d931f1242dd122a517b1498&uid=0853106B-6D69-44A6-B183-5D21B4462DDD" },
+        { name: "Girls Varsity Volleyball",   sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62359.ics?t=dca5673ca6fd59aab1c8b09bcc57825a&uid=B7AE3484-21AC-4529-B895-A9613813333D" },
+        { name: "Girls JV Volleyball",        sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62361.ics?t=bcb7be5017fefc38436b71199a2896dc&uid=88FEA4F6-ED8E-454D-8E57-4D06AF27905D" },
+        { name: "Co-Ed MS Volleyball Green",  sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62345.ics?t=819d264538c46722e8cd6fd4c8ed650a&uid=DC184533-C72C-4A35-A5EF-5ACB6474D625" },
+        { name: "Co-Ed MS Volleyball White",  sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62344.ics?t=6b09e4eb459bd56e76bb5375218f0fcf&uid=C946DB40-958C-44E0-A6C9-CDA7F1FBDED1" },
+        { name: "Girls 8th Grade Volleyball", sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62343.ics?t=1157a8f68aebbc0cbf1a366c56775840&uid=CA5913D0-038D-460A-B415-AEB1FC3003CD" },
+        { name: "MS 6th/7th Girls Volleyball Green", sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62355.ics?t=c3ade2b0b1f64ecf917c699f1060e553&uid=3CC63E31-F98B-4ABF-B57F-CB5545075654" },
+        { name: "MS 6th/7th Girls Volleyball White", sport: "Volleyball", url: "https://api.veracross.com/oakwood/teams/62354.ics?t=2184afec7666f1cd4cb7725ff8a6429d&uid=BC42B07A-08E2-4229-9493-ADBB16251FCF" },
+    ];
+
+    // Job slots per sport (matches iOS app)
+    const JOBS = {
+        Basketball: [{ name: "Clock", slots: 1 }, { name: "Scoreboard", slots: 1 }, { name: "Shot Clock", slots: 1 }],
+        Volleyball: [{ name: "Line Judge", slots: 2 }, { name: "Scorebook", slots: 1 }, { name: "Scoreboard", slots: 1 }],
+    };
+
+    let allGames = [];     // parsed from ICS
+    let allSignups = {};   // eventId -> [signup]
+    let sportFilter = 'all';
+
+    // Fetch all ICS calendars in parallel
+    async function loadGames() {
+        const results = await Promise.all(CALENDARS.map(async cal => {
+            try {
+                const r = await fetch(cal.url);
+                const ics = await r.text();
+                return parseICS(ics, cal);
+            } catch { return []; }
+        }));
+        allGames = results.flat()
+            .filter(g => !g.isAway && !g.isCancelled)
+            .sort((a, b) => a.date - b.date);
+        renderSports();
+    }
+
+    function parseICS(ics, cal) {
+        // Unfold continuation lines
+        const unfolded = ics.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
+        const events = [];
+        const blocks = unfolded.split(/BEGIN:VEVENT/);
+        for (let i = 1; i < blocks.length; i++) {
+            const b = blocks[i];
+            const get = key => {
+                const m = b.match(new RegExp(`^${key}[;:][^\r\n]*`, 'm'));
+                if (!m) return '';
+                return m[0].replace(/^[^:]+:/, '').trim();
+            };
+            const uid = get('UID'), summary = get('SUMMARY'), dtstart = get('DTSTART');
+            if (!uid || !summary || !dtstart) continue;
+            const isAway = summary.includes('(Away)');
+            const isCancelled = summary.includes('(CANCELLED)');
+            const date = parseICalDate(dtstart);
+            const opponent = extractOpponent(summary);
+            events.push({ id: uid, sport: cal.sport, team: cal.name, opponent, date, isAway, isCancelled });
         }
-    </script>
+        return events;
+    }
+
+    function parseICalDate(s) {
+        const d = s.replace(/[TZ]/g, '');
+        return new Date(
+            +d.slice(0,4), +d.slice(4,6)-1, +d.slice(6,8),
+            +d.slice(8,10)||0, +d.slice(10,12)||0
+        );
+    }
+
+    function extractOpponent(summary) {
+        let s = summary.replace(/\s*\((Away|Home|CANCELLED)\)/g, '').trim();
+        const colon = s.lastIndexOf(': ');
+        if (colon !== -1) s = s.slice(colon + 2);
+        const vs = s.search(/\s+vs\s+/i);
+        if (vs !== -1) s = s.slice(s.indexOf(' ', vs) + 4);
+        return s.trim();
+    }
+
+    // Listen for signup changes in real time
+    onSnapshot(query(collection(db, 'scoreboardSignups')), snapshot => {
+        allSignups = {};
+        snapshot.docs.forEach(d => {
+            const s = { id: d.id, ...d.data() };
+            if (!allSignups[s.eventId]) allSignups[s.eventId] = [];
+            allSignups[s.eventId].push(s);
+        });
+        renderSports();
+    });
+
+    window.setSportFilter = function(sport, btn) {
+        sportFilter = sport;
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderSports();
+    };
+
+    function renderSports() {
+        const container = document.getElementById('sports-container');
+        const now = new Date();
+
+        let games = sportFilter === 'all' ? allGames : allGames.filter(g => g.sport === sportFilter);
+        if (!games.length) {
+            container.innerHTML = '<div class="empty">No games found — calendar data may still be loading</div>';
+            return;
+        }
+
+        const dateLabel = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const sportClass = s => s === 'Basketball' ? 'basketball' : 'volleyball';
+
+        container.innerHTML = '<div class="games-list">' + games.map(game => {
+            const isPast = game.date < now;
+            const signups = allSignups[game.id] || [];
+            const jobs = JOBS[game.sport] || [];
+
+            const slots = jobs.flatMap(job =>
+                Array.from({ length: job.slots }, (_, i) => {
+                    const signup = signups.find(s => s.job === job.name && s.slot === i);
+                    const label = job.slots > 1 ? `${job.name} ${i+1}` : job.name;
+                    return signup
+                        ? `<span class="slot-chip filled"><span class="slot-label">${label}:</span><span class="slot-name">${signup.userName}</span></span>`
+                        : `<span class="slot-chip open"><span class="slot-label open">${label}: open</span></span>`;
+                })
+            ).join('');
+
+            return `
+                <div class="game-row${isPast ? ' past' : ''}">
+                    <div class="game-top">
+                        <span class="game-date">${dateLabel(game.date)}</span>
+                        <span class="badge badge-${sportClass(game.sport)}">${game.sport}</span>
+                        <span class="game-title">vs ${game.opponent}</span>
+                        <span class="game-team">${game.team}</span>
+                    </div>
+                    ${slots ? `<div class="slot-row">${slots}</div>` : ''}
+                </div>`;
+        }).join('') + '</div>';
+    }
+
+    loadGames();
+
+    // ─── BANNERS ──────────────────────────────────────────────────────────────
+
+    onSnapshot(query(collection(db, 'appConfig'), where('isActive', '==', true)), snapshot => {
+        renderBanners(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    function renderBanners(banners) {
+        const container = document.getElementById('banners-container');
+        if (!banners.length) { container.innerHTML = '<div class="empty">No active banners</div>'; return; }
+        container.innerHTML = banners.map(b => `
+            <div class="banner-item">
+                <div>
+                    <span class="badge badge-${b.type}" style="margin-right:8px">${b.type}</span>
+                    <span style="font-size:14px;font-weight:500">${b.message}</span>
+                </div>
+                <button class="btn-danger" onclick="deleteBanner('${b.id}')">Remove</button>
+            </div>`).join('');
+    }
+
+    window.addBanner = async function() {
+        const message = document.getElementById('banner-message').value.trim();
+        const type = document.getElementById('banner-type').value;
+        if (!message) return alert('Please enter a message.');
+        await addDoc(collection(db, 'appConfig'), { message, type, isActive: true });
+        document.getElementById('banner-message').value = '';
+    };
+
+    window.deleteBanner = async id => {
+        if (confirm('Remove this banner from the app?'))
+            await updateDoc(doc(db, 'appConfig', id), { isActive: false });
+    };
+
+</script>
 </body>
 </html>

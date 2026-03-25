@@ -64,11 +64,24 @@ class AppInfo: ObservableObject {
         loadCookies()
         loadGoogleLogin()
 
+        // If already signed in from a previous session, save FCM token now
+        #if os(iOS)
+        if googleVM.isSignedIn && !googleVM.userEmail.isEmpty {
+            PushNotificationManager.shared.refreshTokenForCurrentUser()
+        }
+        #endif
+
         // Observe googleVM published properties and persist snapshot when they change
         googleVM.$isSignedIn
             .combineLatest(googleVM.$userName, googleVM.$userEmail)
             .sink { [weak self] isSignedIn, name, email in
                 self?.saveGoogleLogin(snapshot: GoogleLoginSnapshot(isSignedIn: isSignedIn, userName: name, userEmail: email))
+                // Save FCM token to Firestore now that we have the user's email
+                if isSignedIn && !email.isEmpty {
+                    #if os(iOS)
+                    PushNotificationManager.shared.refreshTokenForCurrentUser()
+                    #endif
+                }
             }
             .store(in: &cancellables)
     }

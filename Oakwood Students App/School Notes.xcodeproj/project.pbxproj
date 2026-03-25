@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		064307CC2F731C12004558A6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 064307CB2F731C12004558A6 /* FirebaseMessaging */; };
 		0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8262F2DCF1400098F78 /* FirebaseAI */; };
 		0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8282F2DCF1400098F78 /* FirebaseAILogic */; };
 		0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */; };
@@ -74,6 +75,7 @@
 				0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */,
 				06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */,
 				06A690B22E723BFE0050E087 /* GoogleSignInSwift in Frameworks */,
+				064307CC2F731C12004558A6 /* FirebaseMessaging in Frameworks */,
 				0651E82D2F2DCF1400098F78 /* FirebaseAnalyticsCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -95,12 +97,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		064307CA2F731C12004558A6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		066836032E692ADB00C7F530 = {
 			isa = PBXGroup;
 			children = (
 				0668360E2E692ADB00C7F530 /* School Notes */,
 				0668361E2E692ADD00C7F530 /* School NotesTests */,
 				066836282E692ADD00C7F530 /* School NotesUITests */,
+				064307CA2F731C12004558A6 /* Frameworks */,
 				0668360D2E692ADB00C7F530 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -145,6 +155,7 @@
 				0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */,
 				0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */,
 				0651E8342F2E4BEE00098F78 /* FirebaseFirestore */,
+				064307CB2F731C12004558A6 /* FirebaseMessaging */,
 			);
 			productName = "School Notes";
 			productReference = 0668360C2E692ADB00C7F530 /* OW Students.app */;
@@ -429,8 +440,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "School Notes/School Notes.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3XPWY9TZUS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -487,8 +499,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "School Notes/School Notes.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3XPWY9TZUS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -719,6 +732,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		064307CB2F731C12004558A6 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		0651E8262F2DCF1400098F78 /* FirebaseAI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
