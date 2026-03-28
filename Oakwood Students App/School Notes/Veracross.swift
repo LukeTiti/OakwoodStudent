@@ -468,8 +468,12 @@ class VeracrossLoginCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     init(onLogin: @escaping () -> Void) { self.onLogin = onLogin }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if webView.url?.absoluteString.contains("/student") == true {
+        let url = webView.url?.absoluteString ?? ""
+        if url.contains("/student") {
             onLogin()
+        } else if url.contains("portals.veracross.com") {
+            // Scroll the login form into view so the username/password fields are visible
+            webView.evaluateJavaScript("document.querySelector('form input[type=\"text\"], form input[type=\"email\"], form')?.scrollIntoView({block:'start'});")
         }
     }
 

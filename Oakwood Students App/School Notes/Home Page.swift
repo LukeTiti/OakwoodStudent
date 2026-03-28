@@ -268,14 +268,45 @@ struct HomeView: View {
     @State private var banners: [AppBanner] = []
     @State private var dismissedBanners: Set<String> = []
 
+    /// The most recent Wednesday at 5 PM — when the Inside Scoop publishes each week.
+    /// "Today" and "tomorrow" in article titles are relative to this date, not the current date.
+    private var articlePublicationDate: Date {
+        let calendar = Calendar.current
+        let now = Date()
+        // weekday: Sun=1, Mon=2, Tue=3, Wed=4, Thu=5, Fri=6, Sat=7
+        let daysSinceWed = (calendar.component(.weekday, from: now) - 4 + 7) % 7
+        var comps = calendar.dateComponents([.year, .month, .day], from: now)
+        comps.day! -= daysSinceWed
+        comps.hour = 17; comps.minute = 0; comps.second = 0
+        let thisWednesday = calendar.date(from: comps)!
+        // If we haven't hit 5 PM Wednesday yet this week, use the previous Wednesday
+        return now >= thisWednesday ? thisWednesday : calendar.date(byAdding: .weekOfYear, value: -1, to: thisWednesday)!
+    }
+
+    /// Replaces relative words "today"/"tomorrow" with explicit dates anchored to the publication Wednesday.
+    private func resolveRelativeDates(in title: String) -> String {
+        let ref = articlePublicationDate
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM d"
+        let todayStr = formatter.string(from: ref)
+        let tomorrowStr = formatter.string(from: Calendar.current.date(byAdding: .day, value: 1, to: ref)!)
+        return title
+            .replacingOccurrences(of: "today", with: todayStr, options: .caseInsensitive)
+            .replacingOccurrences(of: "tonight", with: todayStr, options: .caseInsensitive)
+            .replacingOccurrences(of: "tomorrow", with: tomorrowStr, options: .caseInsensitive)
+    }
+
     private func hasTodayDate(in title: String) -> Bool {
+        let resolved = resolveRelativeDates(in: title)
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return false }
-        let matches = detector.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        let matches = detector.matches(in: resolved, range: NSRange(resolved.startIndex..., in: resolved))
         let now = Date()
         return matches.contains { match in
             guard let start = match.date else { return false }
             if match.duration > 0 {
-                return now >= start && now <= start.addingTimeInterval(match.duration)
+                let startOfToday = Calendar.current.startOfDay(for: now)
+                let startOfEvent = Calendar.current.startOfDay(for: start)
+                return startOfToday >= startOfEvent && now <= start.addingTimeInterval(match.duration)
             }
             return Calendar.current.isDateInToday(start)
         }

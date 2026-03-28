@@ -80,6 +80,7 @@ enum AppSection: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject var appInfo: AppInfo
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     #if os(macOS)
     @State private var selectedSection: AppSection? = .insideScoop
@@ -87,6 +88,13 @@ struct ContentView: View {
 
     var body: some View {
         #if os(iOS)
+        if !hasCompletedOnboarding {
+            OnboardingView()
+                .transition(.asymmetric(
+                    insertion: .opacity,
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
+        } else {
         TabView {
             Tab("Inside Scoop", systemImage: "newspaper") {
                 HomeView()
@@ -108,6 +116,11 @@ struct ContentView: View {
                 SettingsView()
             }
         }
+        .transition(.asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .opacity
+        ))
+        } // end else (hasCompletedOnboarding)
         #elseif os(macOS)
         NavigationSplitView {
             List(AppSection.allCases, selection: $selectedSection) { section in

@@ -139,6 +139,17 @@ class AppInfo: ObservableObject {
         info.removeValue(forKey: scoreId)
     }
 
+    func markPastAssignmentsCompleted() {
+        let now = Date()
+        for course in courses {
+            for assignment in course.assignments ?? [] {
+                if let due = assignment.dueDate, due < now {
+                    info[assignment.score_id] = true
+                }
+            }
+        }
+    }
+
     // MARK: - Google VM persistence
     private func saveGoogleLogin(snapshot: GoogleLoginSnapshot) {
         if let data = try? JSONEncoder().encode(snapshot) {

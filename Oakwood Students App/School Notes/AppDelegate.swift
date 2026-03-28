@@ -27,8 +27,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Configure FCM token manager
         PushNotificationManager.shared.configure()
 
-        // Request notification permission and register for remote notifications
-        GradeNotificationService.shared.requestNotificationPermission()
+        // Only request notification permission if onboarding is complete —
+        // new users are prompted during the onboarding flow instead
+        if UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+            GradeNotificationService.shared.requestNotificationPermission()
+        }
         application.registerForRemoteNotifications()
 
         // Register background task
