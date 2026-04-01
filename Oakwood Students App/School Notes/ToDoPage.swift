@@ -11,6 +11,7 @@ struct ToDoPage: View {
     @State private var showAddAssignment = false
     @State private var showAll = false
     @EnvironmentObject var appInfo: AppInfo
+    @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
 
     private var allPairs: [(assignment: Assignment, courseName: String)] {
         let veracross = appInfo.courses.flatMap { course in
@@ -112,6 +113,10 @@ struct ToDoPage: View {
                     errorMessage = err
                 }
                 await appInfo.loadResourceAssignmentIds()
+                if !hasMarkedPastAssignments {
+                    appInfo.markPastAssignmentsCompleted()
+                    hasMarkedPastAssignments = true
+                }
             }
         }
     }

@@ -190,7 +190,6 @@ struct OnboardingView: View {
                 GoogleOnboardingPage(onComplete: advance, onSkip: advance)
             default:
                 CompleteOnboardingPage {
-                    appInfo.markPastAssignmentsCompleted()
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
                         hasCompletedOnboarding = true
                     }
