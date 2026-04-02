@@ -102,6 +102,7 @@ enum GradesLoginState {
 struct VeracrossGradesView: View {
     @State private var loginState: GradesLoginState = .checking
     @State private var errorMessage: String?
+    @State private var showStats = false
     @EnvironmentObject var appInfo: AppInfo
 
     var body: some View {
@@ -173,9 +174,20 @@ struct VeracrossGradesView: View {
                             Label("Refresh", systemImage: "arrow.clockwise")
                         }
                     }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            showStats = true
+                        } label: {
+                            Label("Stats", systemImage: "chart.bar.fill")
+                        }
+                    }
                 }
                 .navigationTitle("Grades")
                 .macInsetListStyle()
+                .sheet(isPresented: $showStats) {
+                    StatsSheet()
+                        .environmentObject(appInfo)
+                }
             }
         }
         .onAppear {
@@ -663,6 +675,156 @@ struct ShareSheet: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 #endif
+
+// MARK: - Stats Sheet
+struct StatsSheet: View {
+    @EnvironmentObject var appInfo: AppInfo
+    @Environment(\.dismiss) private var dismiss
+
+    private func letterToPoints(_ letter: String) -> Double? {
+        switch letter.trimmingCharacters(in: .whitespaces) {
+        case "A":   return 4.0
+        case "A-":  return 3.7
+        case "B+":  return 3.3
+        case "B":   return 3.0
+        case "B-":  return 2.7
+        case "C+":  return 2.3
+        case "C":   return 2.0
+        case "C-":  return 1.7
+        case "D+":  return 1.3
+        case "D":   return 1.0
+        case "D-":  return 0.7
+        case "F":   return 0.0
+        default:    return nil
+        }
+    }
+
+    private func gpaColor(_ points: Double) -> Color {
+        if points >= 3.7 { return .green }
+        if points >= 3.0 { return .yellow }
+        if points >= 2.0 { return .orange }
+        return .red
+    }
+
+    private func isWeighted(_ courseName: String) -> Bool {
+        let lower = courseName.lowercased()
+        return lower.contains("honors") || lower.contains("ap ")
+    }
+
+    private struct CourseGPAEntry {
+        let name: String
+        let letter: String
+        let percent: String?
+        let points: Double
+        let weighted: Bool
+    }
+
+    private var entries: [CourseGPAEntry] {
+        appInfo.courses.compactMap { course in
+            guard let letter = course.ptd_letter_grade,
+                  var pts = letterToPoints(letter) else { return nil }
+            let weighted = isWeighted(course.class_name)
+            if weighted { pts += 1 }
+            return CourseGPAEntry(name: course.class_name, letter: letter.trimmingCharacters(in: .whitespaces), percent: course.ptd_grade, points: pts, weighted: weighted)
+        }
+    }
+
+    private var weightedGPA: Double? {
+        guard !entries.isEmpty else { return nil }
+        return entries.map(\.points).reduce(0, +) / Double(entries.count)
+    }
+
+    private var unweightedGPA: Double? {
+        guard !entries.isEmpty else { return nil }
+        let unweightedPoints = entries.map { $0.weighted ? $0.points - 1 : $0.points }
+        return unweightedPoints.reduce(0, +) / Double(entries.count)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let weighted = weightedGPA, let unweighted = unweightedGPA {
+                    Section {
+                        HStack(spacing: 0) {
+                            Spacer()
+                            VStack(spacing: 4) {
+                                Text(weighted, format: .number.precision(.fractionLength(2)))
+                                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                                    .foregroundColor(gpaColor(weighted))
+                                Text("Weighted")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Divider()
+                            Spacer()
+                            VStack(spacing: 4) {
+                                Text(unweighted, format: .number.precision(.fractionLength(2)))
+                                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                                    .foregroundColor(gpaColor(unweighted))
+                                Text("Unweighted")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    }
+                } else {
+                    Section {
+                        Text("No grade data yet. Grades load from Veracross.")
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if !entries.isEmpty {
+                    Section("Courses") {
+                        ForEach(entries, id: \.name) { entry in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name)
+                                        .font(.body)
+                                    if entry.weighted {
+                                        Text("Weighted")
+                                            .font(.caption)
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text(entry.letter)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(gpaColor(entry.points))
+                                    let unweightedPts = entry.weighted ? entry.points - 1 : entry.points
+                                    if entry.weighted {
+                                        HStack(spacing: 8) {
+                                            Text("W: \(entry.points, format: .number.precision(.fractionLength(1)))")
+                                                .foregroundColor(gpaColor(entry.points))
+                                            Text("UW: \(unweightedPts, format: .number.precision(.fractionLength(1)))")
+                                                .foregroundColor(gpaColor(unweightedPts))
+                                        }
+                                        .font(.subheadline)
+                                    } else {
+                                        Text(entry.points, format: .number.precision(.fractionLength(1)))
+                                            .font(.subheadline)
+                                            .foregroundColor(gpaColor(entry.points))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Stats")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
 
 // MARK: - Cookie Sync
 func syncCookies() async {

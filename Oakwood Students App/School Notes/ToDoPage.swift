@@ -86,6 +86,7 @@ struct ToDoPage: View {
                         Image(systemName: showAll ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
                 }
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         showAddAssignment = true
@@ -98,6 +99,7 @@ struct ToDoPage: View {
                 AddAssignmentSheet()
                     .environmentObject(appInfo)
             }
+
         }
         .onAppear {
             Task {
