@@ -28,9 +28,12 @@ class AppInfo: ObservableObject {
     @Published var reloadID = UUID()
     @Published var signInSheet = false
     @Published var classes: [ClassS] = []
-    @Published var courses: [Course] = []
+    @Published var courses: [Course] = [] {
+        didSet { saveCourses() }
+    }
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
+    @Published var personPK: Int? = nil
 
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
@@ -59,6 +62,7 @@ class AppInfo: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        loadCachedCourses()
         loadAssignmentInfo()
         loadCustomAssignments()
         loadCookies()
@@ -84,6 +88,19 @@ class AppInfo: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    private func saveCourses() {
+        if let data = try? JSONEncoder().encode(courses) {
+            UserDefaults.standard.set(data, forKey: "cachedCourses")
+        }
+    }
+
+    private func loadCachedCourses() {
+        if let data = UserDefaults.standard.data(forKey: "cachedCourses"),
+           let decoded = try? JSONDecoder().decode([Course].self, from: data) {
+            courses = decoded
+        }
     }
 
     private func saveAssignmentInfo() {
@@ -216,6 +233,22 @@ class AppInfo: ObservableObject {
 
     // MARK: - Shared Veracross Helpers
 
+    /// Fetches the Veracross portal HTML and extracts the person PK from the Sentry user config.
+    func fetchPersonPK() async {
+        guard let url = URL(string: "https://portals.veracross.com/oakwood/student") else { return }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = true
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let html = String(data: data, encoding: .utf8) else { return }
+        let pattern = #"id:\s*"(\d+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let range = Range(match.range(at: 1), in: html),
+              let pk = Int(html[range]) else { return }
+        await MainActor.run { self.personPK = pk }
+    }
+
     /// Fetches the course list from Veracross and populates `self.courses`.
     /// Returns an error string on failure, or nil on success.
     func loadCourses() async -> String? {
@@ -244,6 +277,7 @@ class AppInfo: ObservableObject {
                 await MainActor.run {
                     self.courses = decoded.courses
                 }
+                await fetchPersonPK()
                 return nil
             } catch {
                 let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"

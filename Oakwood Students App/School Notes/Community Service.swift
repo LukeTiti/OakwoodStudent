@@ -23,8 +23,8 @@ struct ServiceView: View {
     @State var selectedIDs: Set<UUID> = []
     @State var showCreateFormSheet = false
 
-    let pdfURL = URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/39950.pdf")!
-    let htmlURL = URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/39950.html")!
+    var pdfURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).pdf") } }
+    var htmlURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).html") } }
     let scoreboardHours: Double = 2.0  // Hours credited per scoreboard job
 
     var sortedYears: [String] { servicesByYear.keys.sorted().reversed() }
@@ -32,6 +32,7 @@ struct ServiceView: View {
 
     var body: some View {
         List {
+                /* TODO: Re-enable for v2 (pending admin approval)
                 // Unclaimed Scoreboard Signups Section
                 if !unclaimedSignups.isEmpty {
                     Section {
@@ -138,6 +139,7 @@ struct ServiceView: View {
                         }
                     }
                 }
+                */
 
                 // Completed Sections (by Year)
                 ForEach(sortedYears, id: \.self) { year in
@@ -160,12 +162,13 @@ struct ServiceView: View {
                 }
             }
             .navigationTitle("Community Service")
+            .inlineNavigationBarTitle()
             .onAppear {
-                loadLocalData()
+                // loadLocalData() // TODO: re-enable for v2
                 Task {
                     await loadServiceHours()
-                    await fetchSubmittedForms()
-                    await fetchUnclaimedSignups()
+                    // await fetchSubmittedForms() // TODO: re-enable for v2
+                    // await fetchUnclaimedSignups() // TODO: re-enable for v2
                 }
             }
             .toolbar {
@@ -176,13 +179,14 @@ struct ServiceView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .confirmationAction) {
-                    Button(action: { showAddSheet = true }) { Image(systemName: "plus") }
+                    // Button(action: { showAddSheet = true }) { Image(systemName: "plus") } // TODO: re-enable for v2
                     Button(action: { showPDF = true }) { Image(systemName: "doc.text") }
+                        .disabled(appInfo.personPK == nil)
                 }
             }
             .sheet(isPresented: $showPDF) {
                 NavigationStack {
-                    PDFViewer(url: pdfURL, appInfo: appInfo)
+                    PDFViewer(url: pdfURL ?? URL(string: "about:blank")!, appInfo: appInfo)
                         .navigationTitle("Service Form")
                         .inlineNavigationBarTitle()
                         .toolbar {
@@ -190,6 +194,7 @@ struct ServiceView: View {
                         }
                 }
             }
+            /* TODO: re-enable for v2
             .sheet(isPresented: $showAddSheet) {
                 AddServiceSheet(toSubmit: $toSubmit, onSave: saveLocalData)
             }
@@ -207,6 +212,7 @@ struct ServiceView: View {
                     }
                 )
             }
+            */
     }
 
     func toggleSelection(_ service: LocalService) {
@@ -627,6 +633,8 @@ struct ServiceForm: Identifiable, Codable { // Physical form with multiple entri
 extension ServiceView {
     func loadServiceHours() async { // Fetches and parses service hours from Veracross HTML
         await appInfo.restorePersistedCookiesIntoStores()
+        if appInfo.personPK == nil { await appInfo.fetchPersonPK() }
+        guard let htmlURL = htmlURL else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: htmlURL)
             guard let html = String(data: data, encoding: .utf8) else { return }

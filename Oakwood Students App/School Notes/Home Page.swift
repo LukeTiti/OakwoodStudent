@@ -67,12 +67,20 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 }
 
-struct ScoopItem: Identifiable {
-    let id = UUID()
+struct ScoopItem: Identifiable, Codable {
+    let id: UUID
     let title: String
     let date: String
     let link: String
     var image: String
+
+    init(title: String, date: String, link: String, image: String) {
+        self.id = UUID()
+        self.title = title
+        self.date = date
+        self.link = link
+        self.image = image
+    }
 }
 
 // Decodes items inside the HTML data-image-sizes attribute
@@ -84,7 +92,20 @@ private struct ImageSizeEntry: Decodable {
 
 class ScoopViewModel: ObservableObject {
     @Published var items: [ScoopItem] = []
-    
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: "cachedScoopItems"),
+           let cached = try? JSONDecoder().decode([ScoopItem].self, from: data) {
+            items = cached
+        }
+    }
+
+    private func saveItems(_ items: [ScoopItem]) {
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: "cachedScoopItems")
+        }
+    }
+
     func fetchScoop(tag: String) {
         guard let url = URL(string: "https://www.oakwoodway.org/inside-scoop?tag_id=\(tag)") else { return }
         
@@ -164,6 +185,7 @@ class ScoopViewModel: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self.items = newItems
+                    self.saveItems(newItems)
                 }
             } catch {
                 print("SwiftSoup parse error:", error)
@@ -401,10 +423,14 @@ struct HomeView: View {
                         }
                     }
                 }
-                ForEach(todayItems + otherItems) { item in
-                    NavigationLink(destination: EventView(events: item)) {
-                        ScoopRow(item: item, showBadge: hasTodayDate(in: item.title))
+                Section {
+                    ForEach(todayItems + otherItems) { item in
+                        NavigationLink(destination: EventView(events: item)) {
+                            ScoopRow(item: item, showBadge: hasTodayDate(in: item.title))
+                        }
                     }
+                } header: {
+                    Text("Issue: \(articlePublicationDate.formatted(.dateTime.month(.wide).day().year()))")
                 }
             }
             .navigationTitle("Inside Scoop")
@@ -425,10 +451,26 @@ struct HomeView: View {
 
 struct EventView: View {
     @State var events: ScoopItem?
+    @State private var showShare = false
+
     var body: some View {
         WebView(url: URL(string: events?.link ?? "")!)
             .navigationTitle(events?.title ?? "")
             .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        showShare = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+            .sheet(isPresented: $showShare) {
+                if let url = URL(string: events?.link ?? "") {
+                    ShareSheet(items: [url])
+                }
+            }
     }
 }
 

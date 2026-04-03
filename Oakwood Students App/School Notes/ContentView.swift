@@ -112,6 +112,9 @@ struct ContentView: View {
             Tab("Service", systemImage: "heart.fill") {
                 ServiceView()
             }
+            Tab("Quick Links", systemImage: "link") {
+                QuickLinks()
+            }
             Tab("Settings", systemImage: "gear") {
                 SettingsView()
             }

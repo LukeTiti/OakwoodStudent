@@ -379,7 +379,7 @@ struct AssignmentDetailView: View {
 
 // MARK: - Link Detection
 
-private func linkedAttributedString(from text: String) -> AttributedString {
+ func linkedAttributedString(from text: String) -> AttributedString {
     var attributed = AttributedString(text)
     guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
         return attributed
