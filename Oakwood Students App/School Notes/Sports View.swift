@@ -24,7 +24,7 @@ struct Badge: View {
 }
 
 // MARK: - Sports Event
-struct SportsEvent: Identifiable {
+struct SportsEvent: Identifiable, Hashable {
     let id: String
     let title: String
     let date: Date
@@ -58,7 +58,7 @@ struct SportsEvent: Identifiable {
 }
 
 // MARK: - School Event
-struct SchoolEvent: Identifiable {
+struct SchoolEvent: Identifiable, Hashable {
     let id: String
     let title: String
     let date: Date
@@ -73,14 +73,16 @@ struct SchoolEvent: Identifiable {
 }
 
 // MARK: - Calendar Item (unified wrapper)
-enum CalendarItem: Identifiable {
+enum CalendarItem: Identifiable, Hashable {
     case sports(SportsEvent)
     case school(SchoolEvent)
+    case personal(SchoolEvent)
 
     var id: String {
         switch self {
         case .sports(let e): return e.id
-        case .school(let e): return e.id
+        case .school(let e): return "school-\(e.id)"
+        case .personal(let e): return "personal-\(e.id)"
         }
     }
 
@@ -88,6 +90,7 @@ enum CalendarItem: Identifiable {
         switch self {
         case .sports(let e): return e.date
         case .school(let e): return e.date
+        case .personal(let e): return e.date
         }
     }
 
@@ -95,6 +98,7 @@ enum CalendarItem: Identifiable {
         switch self {
         case .sports(let e): return e.sportName
         case .school: return "School Events"
+        case .personal: return "My Schedule"
         }
     }
 }
@@ -170,14 +174,36 @@ struct SchoolEventRow: View {
     }
 }
 
+// MARK: - Personal Event Row
+struct PersonalEventRow: View {
+    let event: SchoolEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Badge(text: "My Schedule", color: .indigo)
+                Spacer()
+            }
+            Text(event.title).fontWeight(.semibold)
+            Label(event.timeText, systemImage: "clock").font(.caption).foregroundColor(.secondary)
+            if !event.location.isEmpty {
+                Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: - School Event Detail View
 struct SchoolEventDetailView: View {
     let event: SchoolEvent
+    var badgeLabel: String = "School Event"
+    var badgeColor: Color = .teal
 
     var body: some View {
         List {
             Section {
-                Badge(text: "School Event", color: .teal)
+                Badge(text: badgeLabel, color: badgeColor)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(event.title).font(.title2).fontWeight(.bold)
                     Label(event.date.formatted(date: .complete, time: .omitted), systemImage: "calendar").foregroundColor(.secondary)
@@ -404,6 +430,47 @@ struct GameDetailView: View {
     }
 }
 
+// MARK: - Day Detail View
+
+struct DaySelection: Identifiable, Hashable {
+    let dateTitle: String
+    let items: [CalendarItem]
+    var id: String { dateTitle }
+}
+
+struct DayDetailView: View {
+    let dateTitle: String
+    let items: [CalendarItem]
+    @EnvironmentObject var appInfo: AppInfo
+
+    var body: some View {
+        List {
+            ForEach(items) { item in
+                switch item {
+                case .sports(let event):
+                    NavigationLink(destination: GameDetailView(event: event)) {
+                        SportsEventRow(
+                            event: event,
+                            score: appInfo.calendarScores[event.id],
+                            mySignups: appInfo.calendarMySignups[event.id] ?? []
+                        )
+                    }
+                case .school(let event):
+                    NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                        SchoolEventRow(event: event)
+                    }
+                case .personal(let event):
+                    NavigationLink(destination: SchoolEventDetailView(event: event, badgeLabel: "My Schedule", badgeColor: .indigo)) {
+                        PersonalEventRow(event: event)
+                    }
+                }
+            }
+        }
+        .navigationTitle(dateTitle)
+        .inlineNavigationBarTitle()
+    }
+}
+
 // MARK: - Calendar Filter View
 struct CalendarFilterView: View {
     let allCategories: [String]
@@ -447,6 +514,7 @@ struct CalendarView: View {
     @EnvironmentObject var appInfo: AppInfo
     @State private var selectedTab = 0
     @State private var showingFilter = false
+    @State private var selectedDay: DaySelection? = nil
     @State private var selectedCategories: Set<String> = {
         guard let data = UserDefaults.standard.data(forKey: "selectedCategories"),
               let cats = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
@@ -454,14 +522,25 @@ struct CalendarView: View {
     }()
 
     var allCategories: [String] {
-        Array(Set(appInfo.calendarItems.map { $0.category })).sorted()
+        Array(Set(appInfo.calendarItems.compactMap { item -> String? in
+            if case .personal = item { return nil }
+            return item.category
+        })).sorted()
     }
 
     var filteredItems: [CalendarItem] {
         let today = Calendar.current.startOfDay(for: Date())
-        var filtered = selectedCategories.isEmpty ? appInfo.calendarItems : appInfo.calendarItems.filter { selectedCategories.contains($0.category) }
+        var filtered = appInfo.calendarItems.filter { if case .personal = $0 { return false }; return true }
+        if !selectedCategories.isEmpty { filtered = filtered.filter { selectedCategories.contains($0.category) } }
         filtered = selectedTab == 0 ? filtered.filter { $0.date >= today } : filtered.filter { $0.date < today }
         return filtered
+    }
+
+    var personalItemsByDate: [String: [CalendarItem]] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        let personal = appInfo.calendarItems.filter { if case .personal = $0 { return true }; return false }
+        return Dictionary(grouping: personal) { formatter.string(from: $0.date) }
     }
 
     var groupedItems: [(String, [CalendarItem])] {
@@ -470,6 +549,77 @@ struct CalendarView: View {
         let grouped = Dictionary(grouping: filteredItems) { formatter.string(from: $0.date) }
         let sorted = grouped.sorted { ($0.value.first?.date ?? .distantPast) < ($1.value.first?.date ?? .distantPast) }
         return selectedTab == 1 ? sorted.reversed() : sorted
+    }
+
+    @ViewBuilder
+    func calendarItemRow(_ item: CalendarItem) -> some View {
+        switch item {
+        case .sports(let event):
+            NavigationLink(destination: GameDetailView(event: event)) {
+                SportsEventRow(event: event, score: appInfo.calendarScores[event.id], mySignups: appInfo.calendarMySignups[event.id] ?? [])
+            }
+        case .school(let event):
+            NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                SchoolEventRow(event: event)
+            }
+        case .personal(let event):
+            NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                PersonalEventRow(event: event)
+            }
+        }
+    }
+
+    @ViewBuilder
+    func dayHeader(date: String, items: [CalendarItem]) -> some View {
+        HStack {
+            Text(date)
+            Spacer()
+            Button {
+                let dayItems = items + (personalItemsByDate[date] ?? [])
+                selectedDay = DaySelection(dateTitle: date, items: dayItems)
+            } label: {
+                HStack(spacing: 3) {
+                    Text("View My Day")
+                    Image(systemName: "chevron.right")
+                }
+                .font(.caption2)
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.blue)
+        }
+    }
+
+    @ViewBuilder
+    var calendarContent: some View {
+        if appInfo.calendarIsLoading {
+            Spacer()
+            ProgressView("Loading events...")
+            Spacer()
+        } else if filteredItems.isEmpty {
+            Spacer()
+            Text(selectedTab == 0 ? "No upcoming events" : "No past events")
+                .foregroundColor(.secondary)
+            Spacer()
+        } else {
+            List {
+                ForEach(groupedItems, id: \.0) { date, items in
+                    Section {
+                        ForEach(items) { item in
+                            calendarItemRow(item)
+                        }
+                    } header: {
+                        dayHeader(date: date, items: items)
+                    }
+                }
+            }
+            .navigationDestination(item: $selectedDay) { selection in
+                DayDetailView(dateTitle: selection.dateTitle, items: selection.items)
+            }
+        }
+    }
+
+    var filterIconName: String {
+        selectedCategories.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill"
     }
 
     var body: some View {
@@ -481,38 +631,14 @@ struct CalendarView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
-
-                if appInfo.calendarIsLoading {
-                    Spacer(); ProgressView("Loading events..."); Spacer()
-                } else if filteredItems.isEmpty {
-                    Spacer(); Text(selectedTab == 0 ? "No upcoming events" : "No past events").foregroundColor(.secondary); Spacer()
-                } else {
-                    List {
-                        ForEach(groupedItems, id: \.0) { date, items in
-                            Section(date) {
-                                ForEach(items) { item in
-                                    switch item {
-                                    case .sports(let event):
-                                        NavigationLink(destination: GameDetailView(event: event)) {
-                                            SportsEventRow(event: event, score: appInfo.calendarScores[event.id], mySignups: appInfo.calendarMySignups[event.id] ?? [])
-                                        }
-                                    case .school(let event):
-                                        NavigationLink(destination: SchoolEventDetailView(event: event)) {
-                                            SchoolEventRow(event: event)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                calendarContent
             }
             .navigationTitle("Calendar")
             .macInsetListStyle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { showingFilter = true } label: {
-                        Image(systemName: selectedCategories.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        Image(systemName: filterIconName)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {

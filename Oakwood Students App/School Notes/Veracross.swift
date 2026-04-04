@@ -12,8 +12,18 @@ import WebKit
 struct CoursesResponse: Codable {
     let courses: [Course]
 }
+struct Attachment: Codable, Identifiable {
+    var id: Int { file_pk }
+    let assignment_id: Int
+    let file_pk: Int
+    let type: String
+    let description: String
+    let url: String
+}
+
 struct AssignmentResponse: Codable {
     let assignments: [Assignment]
+    let attachments: [Attachment]?
 }
 
 struct Course: Codable, Identifiable {
@@ -41,6 +51,7 @@ struct Assignment: Codable, Identifiable {
     var completion_status: String?
     var is_unread: Int?
     var customCourseName: String?
+    var attachments: [Attachment]?
 }
 
 // MARK: - Assignment Helpers
@@ -144,7 +155,7 @@ struct VeracrossGradesView: View {
                                     }
                                 }
                                 Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
+                                VStack(alignment: .center, spacing: 2) {
                                     if let letter = course.ptd_letter_grade {
                                         Text(letter.trimmingCharacters(in: .whitespaces))
                                             .font(.title3)
@@ -721,7 +732,8 @@ struct StatsSheet: View {
 
     private var entries: [CourseGPAEntry] {
         appInfo.courses.compactMap { course in
-            guard let letter = course.ptd_letter_grade,
+            guard !course.class_name.lowercased().contains("independent pe"),
+                  let letter = course.ptd_letter_grade,
                   var pts = letterToPoints(letter) else { return nil }
             let weighted = isWeighted(course.class_name)
             if weighted { pts += 1 }

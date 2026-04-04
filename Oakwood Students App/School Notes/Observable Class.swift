@@ -34,6 +34,13 @@ class AppInfo: ObservableObject {
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
     @Published var personPK: Int? = nil
+    @Published var personalCalendarURL: String? = nil {
+        didSet {
+            if let url = personalCalendarURL {
+                UserDefaults.standard.set(url, forKey: "personalCalendarURL")
+            }
+        }
+    }
 
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
@@ -67,6 +74,7 @@ class AppInfo: ObservableObject {
         loadCustomAssignments()
         loadCookies()
         loadGoogleLogin()
+        personalCalendarURL = UserDefaults.standard.string(forKey: "personalCalendarURL")
 
         // If already signed in from a previous session, save FCM token now
         #if os(iOS)
@@ -249,6 +257,44 @@ class AppInfo: ObservableObject {
         await MainActor.run { self.personPK = pk }
     }
 
+    /// Fetches the Veracross calendar subscription page and stores the "All classes" iCal URL.
+    func fetchPersonalCalendarURL() async {
+        guard let url = URL(string: "https://portals.veracross.com/oakwood/student/calendar/subscribe/mine") else { return }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = true
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+            print("[PersonalCal] Network request failed")
+            return
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        print("[PersonalCal] Subscribe page status: \(status)")
+        guard status == 200,
+              let html = String(data: data, encoding: .utf8),
+              let doc = try? SwiftSoup.parse(html) else { return }
+
+        // "All Classes" is a label in a sibling cell — walk up from it to find the webcal link in the same row
+        let allElements = (try? doc.getAllElements().array()) ?? []
+        for element in allElements {
+            let ownText = (try? element.ownText()) ?? ""
+            guard ownText.localizedCaseInsensitiveContains("all classes") else { continue }
+            var container = element.parent()
+            while let c = container {
+                if let link = try? c.select("a[href^='webcal://api.veracross.com/oakwood/subscribe/']").first(),
+                   var href = try? link.attr("href"), !href.isEmpty {
+                    if href.hasPrefix("webcal://") {
+                        href = "https://" + href.dropFirst("webcal://".count)
+                    }
+                    print("[PersonalCal] Found All Classes feed: \(href)")
+                    await MainActor.run { self.personalCalendarURL = href }
+                    return
+                }
+                container = c.parent()
+            }
+        }
+        print("[PersonalCal] No 'All Classes' feed found")
+    }
+
     /// Fetches the course list from Veracross and populates `self.courses`.
     /// Returns an error string on failure, or nil on success.
     func loadCourses() async -> String? {
@@ -278,6 +324,7 @@ class AppInfo: ObservableObject {
                     self.courses = decoded.courses
                 }
                 await fetchPersonPK()
+                if personalCalendarURL == nil { await fetchPersonalCalendarURL() }
                 return nil
             } catch {
                 let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"
@@ -326,9 +373,16 @@ class AppInfo: ObservableObject {
 
             do {
                 let decoded = try JSONDecoder().decode(AssignmentResponse.self, from: data)
+                let attachmentsByID = Dictionary(grouping: decoded.attachments ?? []) { $0.assignment_id }
+                var assignmentsWithAttachments = decoded.assignments
+                for i in assignmentsWithAttachments.indices {
+                    if let id = assignmentsWithAttachments[i].assignment_id {
+                        assignmentsWithAttachments[i].attachments = attachmentsByID[id]
+                    }
+                }
                 await MainActor.run {
                     if let idx = self.courses.firstIndex(where: { $0.enrollment_pk == courseID }) {
-                        self.courses[idx].assignments = decoded.assignments
+                        self.courses[idx].assignments = assignmentsWithAttachments
                     }
                 }
                 return nil
@@ -459,11 +513,13 @@ class AppInfo: ObservableObject {
         guard !calendarIsLoading else { return }
         await MainActor.run { calendarIsLoading = true }
 
+        await fetchPersonalCalendarURL()
         async let sportsTask = loadCalendarSportsEvents()
         async let schoolTask = loadCalendarSchoolEvents()
-        let (sports, school) = await (sportsTask, schoolTask)
+        async let personalTask = loadPersonalCalendarEvents()
+        let (sports, school, personal) = await (sportsTask, schoolTask, personalTask)
 
-        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) }
+        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) } + personal.map { .personal($0) }
         var seen = Set<String>()
         let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
         let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
@@ -500,6 +556,34 @@ class AppInfo: ObservableObject {
             for await events in group { allEvents.append(contentsOf: events) }
         }
         return allEvents
+    }
+
+    func loadPersonalCalendarEvents() async -> [SchoolEvent] {
+        print("[PersonalCal] personalCalendarURL = \(personalCalendarURL ?? "nil")")
+        guard let urlString = personalCalendarURL,
+              let url = URL(string: urlString) else { return [] }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              let ics = String(data: data, encoding: .utf8) else {
+            print("[PersonalCal] iCal fetch failed")
+            return []
+        }
+        print("[PersonalCal] iCal fetched, \(ics.components(separatedBy: "BEGIN:VEVENT").count - 1) events")
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        return parseICalRecords(ics).compactMap { record -> SchoolEvent? in
+            guard let uid = record["UID"],
+                  let summary = record["SUMMARY"],
+                  let dtstart = record["DTSTART"] else { return nil }
+            let date = parseICalDate(dtstart)
+            let endDate = record["DTEND"].flatMap { parseICalDate($0) }
+            let location = record["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
+            return SchoolEvent(
+                id: uid, title: summary, date: date,
+                startTime: timeFormatter.string(from: date),
+                endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
+                location: location, description: ""
+            )
+        }
     }
 
     func loadCalendarSchoolEvents() async -> [SchoolEvent] {
@@ -551,6 +635,8 @@ class AppInfo: ObservableObject {
         guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
         if summary.range(of: "^(HS|LS|MS)\\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$", options: .regularExpression) != nil { return nil }
         if summary.range(of: "\\bvs\\b", options: [.regularExpression, .caseInsensitive]) != nil { return nil }
+        if summary.range(of: "\\bmeet\\b", options: [.regularExpression, .caseInsensitive]) != nil { return nil }
+        let displayTitle = summary.localizedCaseInsensitiveContains("First Friday Schedule") ? "First Friday Late Start" : summary
         let date = parseICalDate(dtstart)
         let endDate = data["DTEND"].flatMap { parseICalDate($0) }
         let location = data["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
@@ -558,7 +644,7 @@ class AppInfo: ObservableObject {
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "h:mm a"
         return SchoolEvent(
-            id: uid, title: summary, date: date,
+            id: uid, title: displayTitle, date: date,
             startTime: timeFormatter.string(from: date),
             endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
             location: location, description: description

@@ -222,6 +222,13 @@ struct AssignmentDetailView: View {
 
     var body: some View {
         List {
+            Section {
+                Text(assignment.assignment_description)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let raw = assignment.raw_score, !raw.isEmpty, let percent = assignment.gradePercent {
                 Section {
                     HStack {
@@ -270,6 +277,36 @@ struct AssignmentDetailView: View {
                 Section("Notes") {
                     Text(linkedAttributedString(from: notes))
                         .font(.body)
+                }
+            }
+
+            if let attachments = assignment.attachments, !attachments.isEmpty {
+                Section("Attachments") {
+                    ForEach(attachments) { attachment in
+                        Button {
+                            if let url = URL(string: attachment.url) {
+                                #if os(iOS)
+                                UIApplication.shared.open(url)
+                                #elseif os(macOS)
+                                NSWorkspace.shared.open(url)
+                                #endif
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: attachmentIcon(for: attachment.description))
+                                    .foregroundColor(.blue)
+                                    .frame(width: 24)
+                                Text(attachment.description)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(2)
+                                Spacer()
+                                Image(systemName: "arrow.up.forward.square")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -329,7 +366,7 @@ struct AssignmentDetailView: View {
                 }
             }
         }
-        .navigationTitle(assignment.assignment_description)
+        .navigationTitle("Assignment")
         .inlineNavigationBarTitle()
         .onAppear {
             if assignment.is_unread == 1 {
@@ -396,6 +433,20 @@ struct AssignmentDetailView: View {
 }
 
 // MARK: - Resource Helpers
+func attachmentIcon(for filename: String) -> String {
+    let ext = (filename as NSString).pathExtension.lowercased()
+    switch ext {
+    case "pdf":                          return "doc.richtext"
+    case "doc", "docx":                  return "doc.text"
+    case "ppt", "pptx":                  return "rectangle.on.rectangle"
+    case "xls", "xlsx":                  return "tablecells"
+    case "jpg", "jpeg", "png", "gif":    return "photo"
+    case "mp4", "mov":                   return "video"
+    case "mp3", "m4a":                   return "music.note"
+    default:                             return "paperclip"
+    }
+}
+
 func resourceIcon(for type: String) -> String {
     switch type {
     case "quizlet": return "rectangle.stack"
