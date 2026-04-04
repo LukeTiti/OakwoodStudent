@@ -33,7 +33,7 @@ struct ClassNotes: View {
             }
             .navigationTitle("Subjects")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button(action: {
                         appInfo.fetchedString.removeAll()
                         Task {
@@ -43,7 +43,7 @@ struct ClassNotes: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
                         appInfo.googleVM.signIn()
                     }){

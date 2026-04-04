@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyAJJLE-lJSDVSHtqwj25sQ1m4AGXJ-878Y</string>
+	<key>GCM_SENDER_ID</key>
+	<string>566131280116</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.luketiti.School-Notes</string>
+	<key>PROJECT_ID</key>
+	<string>oakwoodstudents-d9495</string>
+	<key>STORAGE_BUCKET</key>
+	<string>oakwoodstudents-d9495.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:566131280116:ios:7825917eb2b55884deb6a1</string>
+</dict>
+</plist>

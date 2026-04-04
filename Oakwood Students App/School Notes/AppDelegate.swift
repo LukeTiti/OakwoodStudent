@@ -5,13 +5,66 @@
 //  Created by Luke Titi on 9/10/25.
 //
 
-
 import SwiftUI
 import Combine
 import GoogleSignIn
+import FirebaseCore
+import FirebaseMessaging
 
-// MARK: - AppDelegate for Google Sign-In URL handling
-class AppDelegate: NSObject, UIApplicationDelegate {
+#if os(iOS)
+import BackgroundTasks
+import UserNotifications
+
+// MARK: - AppDelegate for Firebase, Google Sign-In, and Background Tasks
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+
+        // Set notification delegate to show alerts while app is open
+        UNUserNotificationCenter.current().delegate = self
+
+        // Configure FCM token manager
+        PushNotificationManager.shared.configure()
+
+        // Only request notification permission if onboarding is complete —
+        // new users are prompted during the onboarding flow instead
+        if UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+            GradeNotificationService.shared.requestNotificationPermission()
+        }
+        application.registerForRemoteNotifications()
+
+        // Register background task
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: GradeNotificationService.backgroundTaskIdentifier,
+            using: nil
+        ) { task in
+            self.handleBackgroundRefresh(task: task as! BGAppRefreshTask)
+        }
+
+        return true
+    }
+
+    // Pass the APNs device token to Firebase so it can generate an FCM token
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+        // Now that APNs token is set, retry topic subscription
+        PushNotificationManager.shared.subscribeToTopics()
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Failed to register for remote notifications: \(error)")
+    }
+
+    // Show notifications even when app is in foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
     func application(
         _ app: UIApplication,
         open url: URL,
@@ -19,7 +72,37 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         return GIDSignIn.sharedInstance.handle(url)
     }
+
+    // Handle background refresh task
+    private func handleBackgroundRefresh(task: BGAppRefreshTask) {
+        task.expirationHandler = {
+            task.setTaskCompleted(success: false)
+        }
+
+        Task {
+            await GradeNotificationService.shared.checkForNewGradesBackground()
+            task.setTaskCompleted(success: true)
+            GradeNotificationService.shared.scheduleBackgroundRefresh()
+        }
+    }
 }
+
+#elseif os(macOS)
+import AppKit
+
+// MARK: - macOS AppDelegate
+class MacAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        FirebaseApp.configure()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            _ = GIDSignIn.sharedInstance.handle(url)
+        }
+    }
+}
+#endif
 
 // MARK: - ViewModel for Google Sign-In
 class GoogleSignInViewModel: ObservableObject {
@@ -27,10 +110,10 @@ class GoogleSignInViewModel: ObservableObject {
     @Published var userName = ""
     @Published var userEmail = ""
 
-    // 🔑 Replace this with your Client ID from Google Cloud Console
     private let clientID = "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
 
     func signIn() {
+        #if os(iOS)
         guard let rootViewController = UIApplication.shared.connectedScenes
                 .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
                 .first?.rootViewController else { return }
@@ -42,10 +125,21 @@ class GoogleSignInViewModel: ObservableObject {
                 self.userName = user.profile?.name ?? ""
                 self.userEmail = user.profile?.email ?? ""
                 self.isSignedIn = true
-            } catch {
-                // Handle error if needed
-            }
+            } catch { }
         }
+        #elseif os(macOS)
+        guard let window = NSApplication.shared.keyWindow else { return }
+
+        Task {
+            do {
+                let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: window)
+                let user = result.user
+                self.userName = user.profile?.name ?? ""
+                self.userEmail = user.profile?.email ?? ""
+                self.isSignedIn = true
+            } catch { }
+        }
+        #endif
     }
 
     func signOut() {
@@ -80,7 +174,7 @@ struct SignInView: View {
         .padding()
         .onChange(of: appInfo.googleVM.isSignedIn) { newValue in
             if newValue {
-                appInfo.reloadID = UUID() // optional if you already do it in ContentView
+                appInfo.reloadID = UUID()
                 appInfo.signInSheet = false
             }
         }
