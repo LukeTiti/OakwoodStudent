@@ -236,6 +236,7 @@ struct VeracrossGradesView: View {
 struct CourseView: View {
     @State private var errorMessage: String?
     @State var course: Course?
+    @State private var showGradeDetail = false
     @EnvironmentObject var appInfo: AppInfo
 
     private var liveCourse: Course? {
@@ -283,6 +284,21 @@ struct CourseView: View {
             }
         }
         .navigationTitle(course?.class_name ?? "Unknown")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showGradeDetail = true
+                } label: {
+                    Image(systemName: "chart.bar.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showGradeDetail) {
+            if let c = liveCourse {
+                CourseGradeDetailSheet(course: c)
+                    .environmentObject(appInfo)
+            }
+        }
         .onAppear {
             guard let course = course else { return }
             let courseID = course.enrollment_pk ?? 0
@@ -833,6 +849,136 @@ struct StatsSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Grade Detail Models
+struct GradeTypeBreakdown: Identifiable {
+    let id = UUID()
+    let typeName: String
+    let count: Int
+    let pointsEarned: Double
+    let pointsPossible: Double
+    let average: Double
+    let weight: Double?  // only present for "Weighting by Assignment Type and Points"
+}
+
+struct GradeDetailResult {
+    let semesterTitle: String
+    let gradingMethod: String
+    let ptdGrade: String
+    let letterGrade: String
+    let breakdown: [GradeTypeBreakdown]
+}
+
+// MARK: - Grade Detail Sheet
+struct CourseGradeDetailSheet: View {
+    let course: Course
+    @EnvironmentObject var appInfo: AppInfo
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedPeriod = 6  // 6 = S2 (current), 2 = S1
+    @State private var result: GradeDetailResult? = nil
+    @State private var isLoading = false
+
+    private var enrollmentPK: Int { course.enrollment_pk ?? 0 }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                } else if let result {
+                    Section {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.semesterTitle).font(.headline)
+                                Text(result.gradingMethod).font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(result.letterGrade).font(.title2.bold())
+                                if let pct = Double(result.ptdGrade) {
+                                    Text(String(format: "%.1f%%", pct))
+                                        .font(.caption)
+                                        .foregroundColor(gradeColor(for: result.ptdGrade))
+                                }
+                            }
+                        }
+                    }
+
+                    Section(header: Text("By Assignment Type")) {
+                        ForEach(result.breakdown) { row in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(row.typeName).fontWeight(.semibold)
+                                    if let w = row.weight {
+                                        Text(String(format: "%.0f%% of grade", w))
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.blue.opacity(0.15))
+                                            .foregroundColor(.blue)
+                                            .clipShape(Capsule())
+                                    }
+                                    Spacer()
+                                    Text(String(format: "%.1f%%", row.average))
+                                        .foregroundColor(gradeColor(for: String(row.average)))
+                                        .fontWeight(.semibold)
+                                }
+                                HStack {
+                                    Text("\(row.count) assignment\(row.count == 1 ? "" : "s")")
+                                        .font(.caption).foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(String(format: "%.1f / %.1f pts", row.pointsEarned, row.pointsPossible))
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } else {
+                    Text("No data available for this period.")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Grade Breakdown")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Picker("Semester", selection: $selectedPeriod) {
+                        Text("S1").tag(2)
+                        Text("S2").tag(6)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 100)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onChange(of: selectedPeriod) { _ in load() }
+            .onAppear { load() }
+        }
+    }
+
+    private func load() {
+        guard enrollmentPK > 0 else { return }
+        isLoading = true
+        result = nil
+        Task {
+            await syncCookies()
+            let fetched = await appInfo.fetchGradeDetail(courseID: enrollmentPK, gradingPeriod: selectedPeriod)
+            await MainActor.run {
+                result = fetched
+                isLoading = false
             }
         }
     }

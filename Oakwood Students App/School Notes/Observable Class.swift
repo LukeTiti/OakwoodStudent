@@ -558,6 +558,41 @@ class AppInfo: ObservableObject {
         return allEvents
     }
 
+    func fetchGradeDetail(courseID: Int, gradingPeriod: Int) async -> GradeDetailResult? {
+        let urlStr = "https://documents.veracross.com/oakwood/grade_detail/\(courseID)?grading_period=\(gradingPeriod)&key=_"
+        guard let url = URL(string: urlStr) else { return nil }
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.httpShouldHandleCookies = true
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let html = String(data: data, encoding: .utf8),
+              let doc = try? SwiftSoup.parse(html) else { return nil }
+
+        let semesterTitle = (try? doc.select("#header h1").first()?.text()) ?? ""
+        let gradingMethod = (try? doc.select("p.assignment_grading_method").first()?.text()) ?? ""
+        let ptdGrade = (try? doc.select("span.ptd_grade").first()?.text()) ?? ""
+        let letterGrade = (try? doc.select("span.letter_grade").first()?.text()) ?? ""
+
+        let rows = (try? doc.select("#assignment_type_summary table tbody tr").array()) ?? []
+        var breakdown: [GradeTypeBreakdown] = []
+        for row in rows {
+            guard let descCell = try? row.select("td.description").first() else { continue }
+            let typeName = (try? descCell.select("strong").first()?.text()) ?? ""
+            guard !typeName.isEmpty else { continue }
+            let countText = (try? descCell.select("span.num_assignments").first()?.text()) ?? ""
+            let count = Int(countText.filter(\.isNumber)) ?? 0
+            let earned = Double((try? row.select("td.points_earned").first()?.text().trimmingCharacters(in: .whitespaces)) ?? "") ?? 0
+            let possible = Double((try? row.select("td.points_possible").first()?.text().trimmingCharacters(in: .whitespaces)) ?? "") ?? 0
+            let average = Double((try? row.select("td.average").first()?.text().trimmingCharacters(in: .whitespaces)) ?? "") ?? 0
+            let weightText = (try? row.select("td.weight").first()?.text().trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) ?? ""
+            let weight = Double(weightText)
+            breakdown.append(GradeTypeBreakdown(typeName: typeName, count: count, pointsEarned: earned, pointsPossible: possible, average: average, weight: weight))
+        }
+
+        return GradeDetailResult(semesterTitle: semesterTitle, gradingMethod: gradingMethod, ptdGrade: ptdGrade, letterGrade: letterGrade, breakdown: breakdown)
+    }
+
     func loadPersonalCalendarEvents() async -> [SchoolEvent] {
         print("[PersonalCal] personalCalendarURL = \(personalCalendarURL ?? "nil")")
         guard let urlString = personalCalendarURL,
