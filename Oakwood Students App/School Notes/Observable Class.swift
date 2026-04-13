@@ -9,6 +9,7 @@ import Combine
 import GoogleSignIn
 import WebKit
 import SwiftSoup
+import WidgetKit
 
 struct GoogleLoginSnapshot: Codable {
     var isSignedIn: Bool
@@ -424,7 +425,48 @@ class AppInfo: ObservableObject {
                 }
             }
         }
+        await MainActor.run { saveAssignmentsForWidget() }
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    func saveAssignmentsForWidget() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let cutoff = Calendar.current.date(byAdding: .day, value: 14, to: today)!
+
+        let veracross = courses.flatMap { course in
+            (course.assignments ?? []).map { (assignment: $0, courseName: course.class_name) }
+        }
+        let custom = customAssignments.map { (assignment: $0, courseName: $0.customCourseName ?? "Custom") }
+
+        let events: [WidgetCalendarEvent] = (veracross + custom)
+            .filter { info[$0.assignment.score_id, default: false] == false }
+            .compactMap { pair in
+                guard let due = pair.assignment.dueDate, due >= today, due <= cutoff else { return nil }
+                return WidgetCalendarEvent(
+                    id: "todo-\(pair.assignment.score_id)",
+                    title: pair.assignment.assignment_description,
+                    date: due,
+                    timeText: "",
+                    badgeLabel: pair.courseName,
+                    colorName: widgetColorName(for: pair.assignment.assignment_type ?? ""),
+                    location: ""
+                )
+            }
+            .sorted { $0.date < $1.date }
+
+        if let data = try? JSONEncoder().encode(Array(events.prefix(20))) {
+            UserDefaults(suiteName: appGroupID)?.set(data, forKey: widgetAssignmentsKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private func widgetColorName(for assignmentType: String) -> String {
+        switch assignmentType.lowercased() {
+        case "test", "exam": return "red"
+        case "quiz":         return "orange"
+        case "homework":     return "green"
+        default:             return "purple"
+        }
     }
 
     // MARK: - Mark Assignment as Read
@@ -530,6 +572,35 @@ class AppInfo: ObservableObject {
             calendarScores = fetchedScores
             calendarIsLoading = false
         }
+
+        saveEventsForWidget(unique)
+    }
+
+    private func saveEventsForWidget(_ items: [CalendarItem]) {
+        let today = Calendar.current.startOfDay(for: Date())
+        let upcoming = items
+            .filter { $0.date >= today }
+            .prefix(20)
+            .map { item -> WidgetCalendarEvent in
+                switch item {
+                case .sports(let e):
+                    return WidgetCalendarEvent(id: e.id, title: e.opponent.isEmpty ? e.title : e.opponent,
+                        date: e.date, timeText: e.timeText, badgeLabel: e.sportName,
+                        colorName: "blue", location: e.location)
+                case .school(let e):
+                    return WidgetCalendarEvent(id: "school-\(e.id)", title: e.title,
+                        date: e.date, timeText: e.timeText, badgeLabel: "School Event",
+                        colorName: "teal", location: e.location)
+                case .personal(let e):
+                    return WidgetCalendarEvent(id: "personal-\(e.id)", title: e.title,
+                        date: e.date, timeText: e.timeText, badgeLabel: "My Schedule",
+                        colorName: "indigo", location: e.location)
+                }
+            }
+        if let data = try? JSONEncoder().encode(Array(upcoming)) {
+            UserDefaults(suiteName: appGroupID)?.set(data, forKey: widgetEventsKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     func refreshCalendarData() async {

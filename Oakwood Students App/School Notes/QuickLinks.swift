@@ -17,7 +17,6 @@ struct QuickLinks: View {
         Link(link: "https://www.oakwoodway.org/family/resource/all-school/dress-code", name: "Dress Code"),
         Link(link: "https://www.oakwoodway.org/fs/sso/?type=Veracross-SSO&target=parentdirectory", name: "School Directory"),
         Link(link: "https://www.oakwoodway.org/support/donate", name: "Donate")
-        
     ]
     var body: some View {
         List {

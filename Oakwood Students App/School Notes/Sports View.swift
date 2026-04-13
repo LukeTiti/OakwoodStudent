@@ -455,13 +455,13 @@ struct DayDetailView: View {
                             mySignups: appInfo.calendarMySignups[event.id] ?? []
                         )
                     }
-                case .school(let event):
-                    NavigationLink(destination: SchoolEventDetailView(event: event)) {
-                        SchoolEventRow(event: event)
-                    }
                 case .personal(let event):
                     NavigationLink(destination: SchoolEventDetailView(event: event, badgeLabel: "My Schedule", badgeColor: .indigo)) {
                         PersonalEventRow(event: event)
+                    }
+                case .school(let event):
+                    NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                        SchoolEventRow(event: event)
                     }
                 }
             }
@@ -575,7 +575,7 @@ struct CalendarView: View {
             Text(date)
             Spacer()
             Button {
-                let dayItems = items + (personalItemsByDate[date] ?? [])
+                let dayItems = (personalItemsByDate[date] ?? []) + items
                 selectedDay = DaySelection(dateTitle: date, items: dayItems)
             } label: {
                 HStack(spacing: 3) {

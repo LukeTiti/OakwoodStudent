@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		064307CC2F731C12004558A6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 064307CB2F731C12004558A6 /* FirebaseMessaging */; };
+		064308772F81F751004558A6 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 064308762F81F751004558A6 /* WidgetKit.framework */; };
+		064308792F81F751004558A6 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 064308782F81F751004558A6 /* SwiftUI.framework */; };
+		064308882F81F752004558A6 /* CalendarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 064308752F81F750004558A6 /* CalendarWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8262F2DCF1400098F78 /* FirebaseAI */; };
 		0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8282F2DCF1400098F78 /* FirebaseAILogic */; };
 		0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */; };
@@ -21,6 +24,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		064308862F81F752004558A6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 066836042E692ADB00C7F530 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 064308742F81F750004558A6;
+			remoteInfo = CalendarWidgetExtension;
+		};
 		0668361C2E692ADD00C7F530 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 066836042E692ADB00C7F530 /* Project object */;
@@ -37,15 +47,63 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		0643088D2F81F752004558A6 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				064308882F81F752004558A6 /* CalendarWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		064308752F81F750004558A6 /* CalendarWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CalendarWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		064308762F81F751004558A6 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		064308782F81F751004558A6 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		0643088E2F81F7B5004558A6 /* CalendarWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CalendarWidgetExtension.entitlements; sourceTree = "<group>"; };
 		0668360C2E692ADB00C7F530 /* OW Students.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OW Students.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		0668361B2E692ADD00C7F530 /* School NotesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		066836252E692ADD00C7F530 /* School NotesUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		064308892F81F752004558A6 /* Exceptions for "CalendarWidget" folder in "CalendarWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				CalendarWidgetControl.swift,
+				CalendarWidgetLiveActivity.swift,
+				Info.plist,
+			);
+			target = 064308742F81F750004558A6 /* CalendarWidgetExtension */;
+		};
+		064308922F81F9EE004558A6 /* Exceptions for "School Notes" folder in "CalendarWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				CalendarWidgetShared.swift,
+			);
+			target = 064308742F81F750004558A6 /* CalendarWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		0643087A2F81F751004558A6 /* CalendarWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				064308892F81F752004558A6 /* Exceptions for "CalendarWidget" folder in "CalendarWidgetExtension" target */,
+			);
+			path = CalendarWidget;
+			sourceTree = "<group>";
+		};
 		0668360E2E692ADB00C7F530 /* School Notes */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				064308922F81F9EE004558A6 /* Exceptions for "School Notes" folder in "CalendarWidgetExtension" target */,
+			);
 			path = "School Notes";
 			sourceTree = "<group>";
 		};
@@ -62,6 +120,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		064308722F81F750004558A6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				064308792F81F751004558A6 /* SwiftUI.framework in Frameworks */,
+				064308772F81F751004558A6 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		066836092E692ADB00C7F530 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -100,6 +167,8 @@
 		064307CA2F731C12004558A6 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				064308762F81F751004558A6 /* WidgetKit.framework */,
+				064308782F81F751004558A6 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -107,9 +176,11 @@
 		066836032E692ADB00C7F530 = {
 			isa = PBXGroup;
 			children = (
+				0643088E2F81F7B5004558A6 /* CalendarWidgetExtension.entitlements */,
 				0668360E2E692ADB00C7F530 /* School Notes */,
 				0668361E2E692ADD00C7F530 /* School NotesTests */,
 				066836282E692ADD00C7F530 /* School NotesUITests */,
+				0643087A2F81F751004558A6 /* CalendarWidget */,
 				064307CA2F731C12004558A6 /* Frameworks */,
 				0668360D2E692ADB00C7F530 /* Products */,
 			);
@@ -121,6 +192,7 @@
 				0668360C2E692ADB00C7F530 /* OW Students.app */,
 				0668361B2E692ADD00C7F530 /* School NotesTests.xctest */,
 				066836252E692ADD00C7F530 /* School NotesUITests.xctest */,
+				064308752F81F750004558A6 /* CalendarWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -128,6 +200,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		064308742F81F750004558A6 /* CalendarWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0643088A2F81F752004558A6 /* Build configuration list for PBXNativeTarget "CalendarWidgetExtension" */;
+			buildPhases = (
+				064308712F81F750004558A6 /* Sources */,
+				064308722F81F750004558A6 /* Frameworks */,
+				064308732F81F750004558A6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0643087A2F81F751004558A6 /* CalendarWidget */,
+			);
+			name = CalendarWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = CalendarWidgetExtension;
+			productReference = 064308752F81F750004558A6 /* CalendarWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		0668360B2E692ADB00C7F530 /* School Notes */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0668362F2E692ADD00C7F530 /* Build configuration list for PBXNativeTarget "School Notes" */;
@@ -135,10 +229,12 @@
 				066836082E692ADB00C7F530 /* Sources */,
 				066836092E692ADB00C7F530 /* Frameworks */,
 				0668360A2E692ADB00C7F530 /* Resources */,
+				0643088D2F81F752004558A6 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				064308872F81F752004558A6 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0668360E2E692ADB00C7F530 /* School Notes */,
@@ -214,9 +310,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					064308742F81F750004558A6 = {
+						CreatedOnToolsVersion = 26.3;
+					};
 					0668360B2E692ADB00C7F530 = {
 						CreatedOnToolsVersion = 26.0;
 					};
@@ -253,11 +352,19 @@
 				0668360B2E692ADB00C7F530 /* School Notes */,
 				0668361A2E692ADD00C7F530 /* School NotesTests */,
 				066836242E692ADD00C7F530 /* School NotesUITests */,
+				064308742F81F750004558A6 /* CalendarWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		064308732F81F750004558A6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0668360A2E692ADB00C7F530 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -282,6 +389,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		064308712F81F750004558A6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		066836082E692ADB00C7F530 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -306,6 +420,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		064308872F81F752004558A6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 064308742F81F750004558A6 /* CalendarWidgetExtension */;
+			targetProxy = 064308862F81F752004558A6 /* PBXContainerItemProxy */;
+		};
 		0668361D2E692ADD00C7F530 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 0668360B2E692ADB00C7F530 /* School Notes */;
@@ -319,6 +438,73 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0643088B2F81F752004558A6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = CalendarWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3XPWY9TZUS;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CalendarWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CalendarWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes.CalendarWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0643088C2F81F752004558A6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = CalendarWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3XPWY9TZUS;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CalendarWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CalendarWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes.CalendarWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		0668362D2E692ADD00C7F530 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -658,6 +844,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		0643088A2F81F752004558A6 /* Build configuration list for PBXNativeTarget "CalendarWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0643088B2F81F752004558A6 /* Debug */,
+				0643088C2F81F752004558A6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		066836072E692ADB00C7F530 /* Build configuration list for PBXProject "School Notes" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
