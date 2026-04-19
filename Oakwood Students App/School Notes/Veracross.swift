@@ -136,10 +136,6 @@ struct VeracrossGradesView: View {
                 .navigationTitle("Login to Veracross")
             case .loggedIn:
                 List {
-                    if let errorMessage = errorMessage {
-                        Text("⚠️ \(errorMessage)")
-                            .foregroundColor(.red)
-                    }
                     ForEach(appInfo.courses) { course in
                         let unreadCount = (course.assignments ?? []).filter { $0.is_unread == 1 }.count
                         NavigationLink(destination: CourseView(course: course)) {
@@ -174,22 +170,16 @@ struct VeracrossGradesView: View {
                         }
                     }
                 }
+                .refreshable {
+                    await loadGrades()
+                    await appInfo.captureCurrentCookies()
+                }
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button {
-                            Task {
-                                await loadGrades()
-                                await appInfo.captureCurrentCookies()
-                            }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
                             showStats = true
                         } label: {
-                            Label("Stats", systemImage: "chart.bar.fill")
+                            Image(systemName: "chart.bar.fill")
                         }
                     }
                 }
@@ -258,11 +248,6 @@ struct CourseView: View {
 
     var body: some View {
         List {
-            if let errorMessage = errorMessage {
-                Text("⚠️ \(errorMessage)")
-                    .foregroundColor(.red)
-            }
-
             Section {
                 GradeHeaderView(course: liveCourse, assignments: assignments)
             }
@@ -349,6 +334,8 @@ struct GradeHeaderView: View {
         var totalEarned = 0.0, totalPossible = 0.0
         var points: [GradePoint] = []
         var didResetSemester = false
+        var lastItemDate: Date? = nil
+        var sameDayCount = 0
 
         for item in graded {
             if !didResetSemester && item.date >= semesterStart {
@@ -361,16 +348,18 @@ struct GradeHeaderView: View {
             totalPossible += item.possible
             let pct = (totalEarned / totalPossible) * 100
 
-            if let last = points.last, cal.isDate(last.date, inSameDayAs: item.date) {
-                points[points.count - 1] = GradePoint(date: item.date, percent: pct, name: item.name, score: item.score)
+            if let last = lastItemDate, cal.isDate(last, inSameDayAs: item.date) {
+                sameDayCount += 1
             } else {
-                points.append(GradePoint(date: item.date, percent: pct, name: item.name, score: item.score))
+                sameDayCount = 0
             }
-        }
+            lastItemDate = item.date
 
-        if let gradeStr = course?.ptd_grade, let currentGrade = Double(gradeStr),
-           let futureDate = cal.date(byAdding: .day, value: 7, to: Date()) {
-            points.append(GradePoint(date: futureDate, percent: currentGrade, name: "Current Grade", score: gradeStr + "%"))
+            let plotDate = sameDayCount > 0
+                ? (cal.date(byAdding: .day, value: sameDayCount * 2, to: item.date) ?? item.date)
+                : item.date
+
+            points.append(GradePoint(date: plotDate, percent: pct, name: item.name, score: item.score))
         }
 
         return points
@@ -401,6 +390,32 @@ struct GradeHeaderView: View {
             }
 
             if gradeHistory.count >= 2 {
+                HStack {
+                    if let sel = selectedPoint {
+                        Text(sel.name)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        let parts = sel.score.split(separator: "/")
+                        let individualPct: String? = parts.count == 2
+                            ? Double(parts[0]).flatMap { e in Double(parts[1]).map { m in String(format: "%.0f%%", e / m * 100) } }
+                            : nil
+                        Text(individualPct != nil
+                             ? "\(sel.score) (\(individualPct!)) · \(String(format: "%.1f", sel.percent))%"
+                             : "\(sel.score) · \(String(format: "%.1f", sel.percent))%")
+                            .font(.caption)
+                            .foregroundColor(gradeColor(for: String(sel.percent)))
+                    } else {
+                        let gradedCount = gradeHistory.filter { $0.score.contains("/") }.count
+                        Text("\(gradedCount) graded assignment\(gradedCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+                .frame(height: 18)
+                .animation(.easeInOut(duration: 0.1), value: selectedPoint?.name)
+
                 GradeChartView(points: gradeHistory, selectedPoint: $selectedPoint)
                     .frame(height: 150)
             } else if !assignments.isEmpty {
@@ -453,15 +468,6 @@ struct GradeChartView: View {
                 PointMark(x: .value("Date", selected.date), y: .value("Grade", selected.percent))
                     .foregroundStyle(gradeColor(for: String(selected.percent)))
                     .symbolSize(60)
-                    .annotation(position: .top, spacing: 8) {
-                        VStack(spacing: 2) {
-                            Text(selected.name).font(.caption2).fontWeight(.semibold).lineLimit(1)
-                            Text("\(selected.score) • \(String(format: "%.1f", selected.percent))%")
-                                .font(.caption2).foregroundColor(.secondary)
-                        }
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    }
             }
         }
         .chartLegend(.hidden)
@@ -748,12 +754,33 @@ struct StatsSheet: View {
 
     private var entries: [CourseGPAEntry] {
         appInfo.courses.compactMap { course in
-            guard !course.class_name.lowercased().contains("independent pe"),
-                  let letter = course.ptd_letter_grade,
-                  var pts = letterToPoints(letter) else { return nil }
+            let nameLower = course.class_name.lowercased()
+            guard !nameLower.contains("independent pe"),
+                  !nameLower.contains("community meeting"),
+                  !nameLower.contains("assembly") else { return nil }
             let weighted = isWeighted(course.class_name)
+            let hasAssignments = !(course.assignments ?? []).isEmpty
+
+            let letter: String
+            var pts: Double
+
+            if let l = course.ptd_letter_grade,
+               !l.trimmingCharacters(in: .whitespaces).isEmpty,
+               let p = letterToPoints(l) {
+                // Has a real grade — use it
+                letter = l.trimmingCharacters(in: .whitespaces)
+                pts = p
+            } else if !hasAssignments {
+                // No assignments yet — assume A (100%)
+                letter = "A"
+                pts = 4.0
+            } else {
+                // Has assignments but no letter grade yet — skip
+                return nil
+            }
+
             if weighted { pts += 1 }
-            return CourseGPAEntry(name: course.class_name, letter: letter.trimmingCharacters(in: .whitespaces), percent: course.ptd_grade, points: pts, weighted: weighted)
+            return CourseGPAEntry(name: course.class_name, letter: letter, percent: course.ptd_grade, points: pts, weighted: weighted)
         }
     }
 
@@ -888,6 +915,15 @@ struct CourseGradeDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Picker("Semester", selection: $selectedPeriod) {
+                    Text("Semester 1").tag(2)
+                    Text("Semester 2").tag(6)
+                }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .padding(.horizontal)
+
                 if isLoading {
                     HStack {
                         Spacer()
@@ -952,14 +988,6 @@ struct CourseGradeDetailSheet: View {
             .navigationTitle("Grade Breakdown")
             .inlineNavigationBarTitle()
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Picker("Semester", selection: $selectedPeriod) {
-                        Text("S1").tag(2)
-                        Text("S2").tag(6)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 100)
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }

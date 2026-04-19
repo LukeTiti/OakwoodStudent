@@ -298,7 +298,6 @@ struct GameDetailView: View {
                     } else if !isSignedIn {
                         Text("Sign in to sign up for jobs").font(.caption).foregroundColor(.secondary)
                     }
-                    if let error = errorMessage { Text(error).font(.caption).foregroundColor(.red) }
                 }
             }
         }
@@ -612,6 +611,7 @@ struct CalendarView: View {
                     }
                 }
             }
+            .refreshable { await appInfo.loadAllCalendarEvents() }
             .navigationDestination(item: $selectedDay) { selection in
                 DayDetailView(dateTitle: selection.dateTitle, items: selection.items)
             }
@@ -639,11 +639,6 @@ struct CalendarView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { showingFilter = true } label: {
                         Image(systemName: filterIconName)
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await appInfo.loadAllCalendarEvents() } } label: {
-                        Image(systemName: "arrow.clockwise")
                     }
                 }
             }

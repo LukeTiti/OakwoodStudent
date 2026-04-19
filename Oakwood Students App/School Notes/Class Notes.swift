@@ -31,18 +31,12 @@ struct ClassNotes: View {
                     }
                 }
             }
+            .refreshable {
+                appInfo.fetchedString.removeAll()
+                try? await loadWebsite()
+            }
             .navigationTitle("Subjects")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(action: {
-                        appInfo.fetchedString.removeAll()
-                        Task {
-                            try? await loadWebsite()
-                        }
-                    }){
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
                         appInfo.googleVM.signIn()

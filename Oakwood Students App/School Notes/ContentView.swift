@@ -82,6 +82,8 @@ struct ContentView: View {
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
+    @State private var selectedTab = "Grades"
+
     #if os(macOS)
     @State private var selectedSection: AppSection? = .insideScoop
     #endif
@@ -95,27 +97,27 @@ struct ContentView: View {
                     removal: .move(edge: .leading).combined(with: .opacity)
                 ))
         } else {
-        TabView {
-            Tab("Inside Scoop", systemImage: "newspaper") {
+        TabView(selection: $selectedTab) {
+            Tab("Inside Scoop", systemImage: "newspaper", value: "Inside Scoop") {
                 HomeView()
                     .onAppear { appInfo.preloadAll() }
             }
-            Tab("To Do", systemImage: "list.bullet") {
+            Tab("To Do", systemImage: "list.bullet", value: "To Do") {
                 ToDoPage()
             }
-            Tab("Grades", systemImage: "list.bullet.rectangle.portrait") {
+            Tab("Grades", systemImage: "list.bullet.rectangle.portrait", value: "Grades") {
                 VeracrossGradesView()
             }
-            Tab("Calendar", systemImage: "calendar") {
+            Tab("Calendar", systemImage: "calendar", value: "Calendar") {
                 CalendarView()
             }
-            Tab("Service", systemImage: "heart.fill") {
+            Tab("Service", systemImage: "heart.fill", value: "Service") {
                 ServiceView()
             }
-            Tab("Quick Links", systemImage: "link") {
+            Tab("Quick Links", systemImage: "link", value: "Quick Links") {
                 QuickLinks()
             }
-            Tab("Settings", systemImage: "gear") {
+            Tab("Settings", systemImage: "gear", value: "Settings") {
                 SettingsView()
             }
         }

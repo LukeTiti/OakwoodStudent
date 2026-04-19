@@ -13,6 +13,45 @@ struct ToDoPage: View {
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
 
+    @State private var showToast = false
+    @State private var toastScoreId = 0
+    @State private var toastDismissTask: Task<Void, Never>?
+
+    private func triggerToast(for scoreId: Int) {
+        toastDismissTask?.cancel()
+        toastScoreId = scoreId
+        withAnimation(.spring(response: 0.35)) { showToast = true }
+        toastDismissTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35)) { showToast = false }
+            }
+        }
+    }
+
+    private var toastView: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Text("Marked as complete")
+                .font(.subheadline.weight(.medium))
+            Spacer()
+            Button("Undo") {
+                toastDismissTask?.cancel()
+                appInfo.toggleInfo(for: toastScoreId)
+                withAnimation(.spring(response: 0.35)) { showToast = false }
+            }
+            .font(.subheadline.weight(.semibold))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
     private var allPairs: [(assignment: Assignment, courseName: String)] {
         let veracross = appInfo.courses.flatMap { course in
             (course.assignments ?? []).map { ($0, course.class_name) }
@@ -50,15 +89,11 @@ struct ToDoPage: View {
     var body: some View {
         NavigationStack {
             List {
-                if !errorMessage.isEmpty {
-                    Text("⚠️ \(errorMessage)")
-                        .foregroundColor(.red)
-                }
                 if !pastDueAssignments.isEmpty {
                     Section(header: Text("Past Due Assignments")) {
                         ForEach(pastDueAssignments, id: \.assignment.score_id) { item in
                             NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
-                                ShowAssignment(assignment: item.assignment, courseName: item.courseName)
+                                ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
                             }
                         }
                     }
@@ -69,12 +104,18 @@ struct ToDoPage: View {
                         Section(header: Text(sectionHeader(for: dayOffset))) {
                             ForEach(items, id: \.assignment.score_id) { item in
                                 NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
-                                    ShowAssignment(assignment: item.assignment, courseName: item.courseName)
+                                    ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
                                 }
                             }
                         }
                     }
                 }
+            }
+            .refreshable {
+                await syncCookies()
+                _ = await appInfo.loadCourses()
+                _ = await appInfo.loadAllAssignments()
+                await appInfo.loadResourceAssignmentIds()
             }
             .navigationTitle("To Do")
             .macInsetListStyle()
@@ -83,7 +124,7 @@ struct ToDoPage: View {
                     Button {
                         withAnimation { showAll.toggle() }
                     } label: {
-                        Image(systemName: showAll ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Text(showAll ? "Hide Done" : "Show All")
                     }
                 }
 
@@ -99,7 +140,12 @@ struct ToDoPage: View {
                 AddAssignmentSheet()
                     .environmentObject(appInfo)
             }
-
+        }
+        .overlay(alignment: .bottom) {
+            if showToast {
+                toastView
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .onAppear {
             Task {
@@ -130,6 +176,7 @@ struct ShowAssignment: View {
     @EnvironmentObject var appInfo: AppInfo
     var courseName: String = ""
     var showGrade: Bool = false
+    var onComplete: ((Int) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center) {
@@ -188,7 +235,9 @@ struct ShowAssignment: View {
         .macRowPadding()
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
+                let wasComplete = appInfo.info[assignment.score_id, default: false]
                 appInfo.toggleInfo(for: assignment.score_id)
+                if !wasComplete { onComplete?(assignment.score_id) }
             } label: {
                 let done = appInfo.info[assignment.score_id, default: false]
                 Label(
