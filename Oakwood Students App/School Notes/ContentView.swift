@@ -100,13 +100,13 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             Tab("Inside Scoop", systemImage: "newspaper", value: "Inside Scoop") {
                 HomeView()
-                    .onAppear { appInfo.preloadAll() }
             }
             Tab("To Do", systemImage: "list.bullet", value: "To Do") {
                 ToDoPage()
             }
             Tab("Grades", systemImage: "list.bullet.rectangle.portrait", value: "Grades") {
                 VeracrossGradesView()
+                    .onAppear { appInfo.preloadAll() }
             }
             Tab("Calendar", systemImage: "calendar", value: "Calendar") {
                 CalendarView()

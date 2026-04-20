@@ -538,7 +538,8 @@ class AppInfo: ObservableObject {
             await restorePersistedCookiesIntoStores()
             async let grades: () = preloadGrades()
             async let calendar: () = loadAllCalendarEvents()
-            await grades; await calendar
+            async let images: () = preloadScoopImages()
+            await grades; await calendar; await images
         }
     }
 

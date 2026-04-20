@@ -195,6 +195,10 @@ struct VeracrossGradesView: View {
             guard loginState == .checking else { return }
             if !appInfo.courses.isEmpty {
                 loginState = .loggedIn
+                Task {
+                    await appInfo.restorePersistedCookiesIntoStores()
+                    await syncCookies()
+                }
                 return
             }
             Task {

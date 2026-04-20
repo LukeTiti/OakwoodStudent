@@ -11,6 +11,22 @@ import WebKit
 
 // MARK: - Image Cache
 
+func preloadScoopImages() async {
+    guard let data = UserDefaults.standard.data(forKey: "cachedScoopItems"),
+          let items = try? JSONDecoder().decode([ScoopItem].self, from: data) else { return }
+    await withTaskGroup(of: Void.self) { group in
+        for item in items {
+            guard let url = URL(string: item.image) else { continue }
+            let key = url.absoluteString
+            guard ImageDataCache.shared.data(for: key) == nil else { continue }
+            group.addTask {
+                guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+                ImageDataCache.shared.store(data, for: key)
+            }
+        }
+    }
+}
+
 private class ImageDataCache {
     static let shared = ImageDataCache()
     private let cache = NSCache<NSString, NSData>()
