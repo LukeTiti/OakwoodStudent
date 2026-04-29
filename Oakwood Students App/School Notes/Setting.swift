@@ -98,6 +98,9 @@ struct SettingsView: View {
                         Text("1.0.0")
                             .foregroundColor(.secondary)
                     }
+                    HStack {
+                        Text("Please report any suggestions or issues to Luke Titi, Big thanks to everyone who is testing this app!")
+                    }
                 }
             }
             .navigationTitle("Settings")

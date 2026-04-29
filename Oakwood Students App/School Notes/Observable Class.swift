@@ -403,6 +403,8 @@ class AppInfo: ObservableObject {
         for assignment in assignments {
             if let raw = assignment.raw_score, !raw.isEmpty {
                 info[assignment.score_id] = true
+            } else if let status = assignment.completion_status, status.hasPrefix("Turned In") {
+                info[assignment.score_id] = true
             } else if assignment.completion_status == "Not Turned In",
                       info[assignment.score_id] == nil {
                 info[assignment.score_id] = false
@@ -554,7 +556,8 @@ class AppInfo: ObservableObject {
 
     func loadAllCalendarEvents() async {
         guard !calendarIsLoading else { return }
-        await MainActor.run { calendarIsLoading = true }
+        let isFirstLoad = await MainActor.run { calendarItems.isEmpty }
+        if isFirstLoad { await MainActor.run { calendarIsLoading = true } }
 
         await fetchPersonalCalendarURL()
         async let sportsTask = loadCalendarSportsEvents()

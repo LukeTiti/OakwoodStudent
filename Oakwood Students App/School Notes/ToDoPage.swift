@@ -95,6 +95,7 @@ struct ToDoPage: View {
                             NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
                                 ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
                             }
+                            .unreadRowBackground(item.assignment.is_unread)
                         }
                     }
                 }
@@ -211,11 +212,13 @@ struct ShowAssignment: View {
                         Text("NTI")
                             .foregroundColor(.red)
                     } else if let percent = assignment.gradePercent {
-                        let color: Color = assignment.is_unread == 1 ? .orange : .primary
                         Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
-                            .foregroundStyle(color)
+                            .foregroundStyle(Color.primary)
                         Text(percent, format: .percent.precision(.fractionLength(2)))
-                            .foregroundStyle(color)
+                            .foregroundStyle(Color.primary)
+                    } else if let status = assignment.completion_status, status.hasPrefix("Turned In") {
+                        Text("Turned In")
+                            .foregroundColor(.secondary)
                     } else {
                         Text("Pending")
                             .foregroundColor(.secondary)

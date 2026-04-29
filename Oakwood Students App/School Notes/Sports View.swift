@@ -545,8 +545,24 @@ struct CalendarView: View {
     var groupedItems: [(String, [CalendarItem])] {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMM d"
-        let grouped = Dictionary(grouping: filteredItems) { formatter.string(from: $0.date) }
-        let sorted = grouped.sorted { ($0.value.first?.date ?? .distantPast) < ($1.value.first?.date ?? .distantPast) }
+        let today = Calendar.current.startOfDay(for: Date())
+
+        var dateMap: [String: (date: Date, items: [CalendarItem])] = [:]
+        for item in filteredItems {
+            let key = formatter.string(from: item.date)
+            if dateMap[key] == nil { dateMap[key] = (item.date, []) }
+            dateMap[key]!.items.append(item)
+        }
+
+        // Add dates that only have personal events (tab-filtered)
+        let allPersonal = appInfo.calendarItems.filter { if case .personal = $0 { return true }; return false }
+        let tabPersonal = selectedTab == 0 ? allPersonal.filter { $0.date >= today } : allPersonal.filter { $0.date < today }
+        for item in tabPersonal {
+            let key = formatter.string(from: item.date)
+            if dateMap[key] == nil { dateMap[key] = (item.date, []) }
+        }
+
+        let sorted = dateMap.sorted { $0.value.date < $1.value.date }.map { ($0.key, $0.value.items) }
         return selectedTab == 1 ? sorted.reversed() : sorted
     }
 
@@ -594,7 +610,7 @@ struct CalendarView: View {
             Spacer()
             ProgressView("Loading events...")
             Spacer()
-        } else if filteredItems.isEmpty {
+        } else if groupedItems.isEmpty {
             Spacer()
             Text(selectedTab == 0 ? "No upcoming events" : "No past events")
                 .foregroundColor(.secondary)
@@ -603,8 +619,14 @@ struct CalendarView: View {
             List {
                 ForEach(groupedItems, id: \.0) { date, items in
                     Section {
-                        ForEach(items) { item in
-                            calendarItemRow(item)
+                        if items.isEmpty {
+                            Text("No school events")
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
+                        } else {
+                            ForEach(items) { item in
+                                calendarItemRow(item)
+                            }
                         }
                     } header: {
                         dayHeader(date: date, items: items)

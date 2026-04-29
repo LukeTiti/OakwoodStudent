@@ -122,91 +122,42 @@ class ScoopViewModel: ObservableObject {
         }
     }
 
-    func fetchScoop(tag: String) {
+    func fetchScoop(tag: String) async {
         guard let url = URL(string: "https://www.oakwoodway.org/inside-scoop?tag_id=\(tag)") else { return }
-        
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("Request error:", error)
-                return
-            }
-            
-            guard let data = data,
-                  let html = String(data: data, encoding: .utf8) else {
-                print("Failed to decode HTML")
-                return
-            }
-            
-            do {
-                let doc: Document = try SwiftSoup.parse(html)
-                
-                let posts = try doc.select("a.fsThumbnail.fsPostLink")
-                var newItems: [ScoopItem] = []
-                
-                for post in posts {
-                    let link = try post.attr("href")
-                    
-                    let div = try post.select("div.fsCroppedImage").first()
-                    let title = try div?.attr("title") ?? "No Title"
-                    
-                    // Extract image URL from data-image-sizes JSON (HTML-entity encoded)
-                    let imageURL: String = {
-                        guard let div = div else { return "" }
-                        let raw = (try? div.attr("data-image-sizes")) ?? ""
-                        guard !raw.isEmpty else { return "" }
-                        
-                        // Unescape HTML entities: &quot; -> "
-                        let unescaped = raw.replacingOccurrences(of: "&quot;", with: "\"")
-                        
-                        // Decode JSON array of { "url": "...", "width": N }
-                        if let data = unescaped.data(using: .utf8),
-                           let entries = try? JSONDecoder().decode([ImageSizeEntry].self, from: data) {
-                            // Prefer the largest width image; fallback to first entry
-                            let best = entries.max(by: { ($0.width ?? 0) < ($1.width ?? 0) }) ?? entries.first
-                            return best?.url ?? ""
-                        }
-                        // As a fallback, try to find an https URL after the marker :&quot;
-                        let marker = ":&quot;"
-                        if let markerRange = raw.range(of: marker),
-                           let httpsRange = raw.range(of: "https:"),
-                           httpsRange.lowerBound > markerRange.upperBound {
-                            // Try to extract a URL-like token from the unescaped string
-                            // Find the next quote after https to bound the URL
-                            let start = unescaped.range(of: "https:", range: unescaped.index(after: unescaped.startIndex)..<unescaped.endIndex)?.lowerBound
-                            if let s = start {
-                                // URL likely ends at the next " character
-                                let tail = unescaped[s...]
-                                if let endQuote = tail.firstIndex(of: "\"") {
-                                    return String(tail[..<endQuote])
-                                } else {
-                                    return String(tail)
-                                }
-                            }
-                        }
-                        return ""
-                    }()
-                    
-                    let item = ScoopItem(
-                        title: title,
-                        date: "", // Date not available in this snippet
-                        link: link.starts(with: "http") ? link : "https://www.oakwoodway.org\(link)",
-                        image: imageURL
-                    )
-                    
-                    newItems.append(item)
+
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let html = String(data: data, encoding: .utf8),
+              let doc = try? SwiftSoup.parse(html),
+              let posts = try? doc.select("a.fsThumbnail.fsPostLink") else { return }
+
+        var newItems: [ScoopItem] = []
+        for post in posts {
+            guard let link = try? post.attr("href"),
+                  let div = try? post.select("div.fsCroppedImage").first() else { continue }
+            let title = (try? div.attr("title")) ?? "No Title"
+            let imageURL: String = {
+                let raw = (try? div.attr("data-image-sizes")) ?? ""
+                guard !raw.isEmpty else { return "" }
+                let unescaped = raw.replacingOccurrences(of: "&quot;", with: "\"")
+                if let data = unescaped.data(using: .utf8),
+                   let entries = try? JSONDecoder().decode([ImageSizeEntry].self, from: data) {
+                    return (entries.max(by: { ($0.width ?? 0) < ($1.width ?? 0) }) ?? entries.first)?.url ?? ""
                 }
-                
-                DispatchQueue.main.async {
-                    self.items = newItems
-                    self.saveItems(newItems)
-                }
-            } catch {
-                print("SwiftSoup parse error:", error)
-            }
-        }.resume()
+                let tail = unescaped.range(of: "https:").map { unescaped[$0.lowerBound...] }
+                if let tail, let endQuote = tail.firstIndex(of: "\"") { return String(tail[..<endQuote]) }
+                return ""
+            }()
+            newItems.append(ScoopItem(
+                title: title,
+                date: "",
+                link: link.starts(with: "http") ? link : "https://www.oakwoodway.org\(link)",
+                image: imageURL
+            ))
+        }
+        items = newItems
+        saveItems(newItems)
     }
 
 
@@ -417,10 +368,11 @@ struct HomeView: View {
             }
             .navigationTitle("Inside Scoop")
             .toolbar { scoopToolbar }
-            .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
+            .refreshable { await viewModel.fetchScoop(tag: tag) }
+            .onChange(of: tag) { _, newValue in Task { await viewModel.fetchScoop(tag: newValue) } }
             .onAppear {
-                viewModel.fetchScoop(tag: tag)
                 Task {
+                    await viewModel.fetchScoop(tag: tag)
                     banners = (try? await FirebaseService.shared.fetchBanners()) ?? []
                     dismissedBanners = []
                 }
@@ -451,10 +403,11 @@ struct HomeView: View {
             }
             .navigationTitle("Inside Scoop")
             .toolbar { scoopToolbar }
-            .onChange(of: tag) { newValue in viewModel.fetchScoop(tag: newValue) }
+            .refreshable { await viewModel.fetchScoop(tag: tag) }
+            .onChange(of: tag) { _, newValue in Task { await viewModel.fetchScoop(tag: newValue) } }
             .onAppear {
-                viewModel.fetchScoop(tag: tag)
                 Task {
+                    await viewModel.fetchScoop(tag: tag)
                     banners = (try? await FirebaseService.shared.fetchBanners()) ?? []
                     dismissedBanners = []
                 }

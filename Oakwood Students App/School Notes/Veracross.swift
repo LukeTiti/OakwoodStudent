@@ -261,6 +261,7 @@ struct CourseView: View {
                     NavigationLink(destination: AssignmentDetailView(assignment: assignment, courseName: course?.class_name ?? "")) {
                         ShowAssignment(assignment: assignment)
                     }
+                    .unreadRowBackground(assignment.is_unread)
                 }
             }
 
@@ -269,6 +270,7 @@ struct CourseView: View {
                     NavigationLink(destination: AssignmentDetailView(assignment: assignment, courseName: course?.class_name ?? "")) {
                         ShowAssignment(assignment: assignment, showGrade: true)
                     }
+                    .unreadRowBackground(assignment.is_unread)
                 }
             }
         }
@@ -318,6 +320,7 @@ struct GradeHeaderView: View {
     let course: Course?
     let assignments: [Assignment]
     @State private var selectedPoint: GradePoint?
+    @State private var selectedSemester = 2
 
     private var gradeHistory: [GradePoint] {
         let cal = Calendar.current
@@ -369,6 +372,26 @@ struct GradeHeaderView: View {
         return points
     }
 
+    private var sem1Points: [GradePoint] {
+        guard let splitIdx = gradeHistory.firstIndex(where: { $0.isSemesterStart }) else {
+            return gradeHistory
+        }
+        return Array(gradeHistory[..<splitIdx])
+    }
+
+    private var sem2Points: [GradePoint] {
+        guard let splitIdx = gradeHistory.firstIndex(where: { $0.isSemesterStart }) else {
+            return []
+        }
+        return Array(gradeHistory[(splitIdx + 1)...])
+    }
+
+    private var hasBothSemesters: Bool { !sem1Points.isEmpty && !sem2Points.isEmpty }
+
+    private var displayedPoints: [GradePoint] {
+        hasBothSemesters && selectedSemester == 1 ? sem1Points : sem2Points.isEmpty ? sem1Points : sem2Points
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -394,6 +417,15 @@ struct GradeHeaderView: View {
             }
 
             if gradeHistory.count >= 2 {
+                if hasBothSemesters {
+                    Picker("Semester", selection: $selectedSemester) {
+                        Text("Semester 1").tag(1)
+                        Text("Semester 2").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: selectedSemester) { _, _ in selectedPoint = nil }
+                }
+
                 HStack {
                     if let sel = selectedPoint {
                         Text(sel.name)
@@ -410,7 +442,7 @@ struct GradeHeaderView: View {
                             .font(.caption)
                             .foregroundColor(gradeColor(for: String(sel.percent)))
                     } else {
-                        let gradedCount = gradeHistory.filter { $0.score.contains("/") }.count
+                        let gradedCount = displayedPoints.filter { $0.score.contains("/") }.count
                         Text("\(gradedCount) graded assignment\(gradedCount == 1 ? "" : "s")")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -420,7 +452,7 @@ struct GradeHeaderView: View {
                 .frame(height: 18)
                 .animation(.easeInOut(duration: 0.1), value: selectedPoint?.name)
 
-                GradeChartView(points: gradeHistory, selectedPoint: $selectedPoint)
+                GradeChartView(points: displayedPoints, selectedPoint: $selectedPoint)
                     .frame(height: 150)
             } else if !assignments.isEmpty {
                 Text("Not enough graded assignments to show trend")
@@ -444,16 +476,8 @@ struct GradeChartView: View {
     var body: some View {
         let minY = (points.map(\.percent).min() ?? 50) - 2
         let maxY = (points.map(\.percent).max() ?? 100) + 2
-        let semStart = Calendar.current.date(from: DateComponents(year: Calendar.current.component(.year, from: Date()), month: 1, day: 1))!
 
         Chart {
-            RuleMark(x: .value("Semester", semStart))
-                .foregroundStyle(.secondary.opacity(0.5))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
-                .annotation(position: .top, alignment: .leading) {
-                    Text("S2").font(.caption2).foregroundColor(.secondary)
-                }
-
             ForEach(1..<points.count, id: \.self) { i in
                 let prev = points[i - 1]
                 let curr = points[i]
@@ -713,6 +737,26 @@ struct ShareSheet: NSViewRepresentable {
 }
 #endif
 
+// MARK: - Document Web View (zoomable, shares Veracross cookie store)
+
+#if os(iOS)
+struct DocumentWebView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.scrollView.minimumZoomScale = 1.0
+        webView.scrollView.maximumZoomScale = 5.0
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+}
+#endif
+
 // MARK: - Stats Sheet
 struct StatsSheet: View {
     @EnvironmentObject var appInfo: AppInfo
@@ -759,9 +803,11 @@ struct StatsSheet: View {
     private var entries: [CourseGPAEntry] {
         appInfo.courses.compactMap { course in
             let nameLower = course.class_name.lowercased()
-            guard !nameLower.contains("independent pe"),
-                  !nameLower.contains("community meeting"),
-                  !nameLower.contains("assembly") else { return nil }
+            let sportsAndNonAcademic = ["independent pe", "community meeting", "assembly",
+                "study period", "volleyball", "basketball", "tennis", "badminton",
+                "soccer", "swimming", "track", "cross country"]
+            guard !sportsAndNonAcademic.contains(where: { nameLower.contains($0) }),
+                  !(nameLower.contains("hs") && nameLower.contains("team")) else { return nil }
             let weighted = isWeighted(course.class_name)
             let hasAssignments = !(course.assignments ?? []).isEmpty
 
@@ -834,6 +880,29 @@ struct StatsSheet: View {
                         Text("No grade data yet. Grades load from Veracross.")
                             .foregroundColor(.secondary)
                     }
+                }
+
+                Section("Documents") {
+                    let pk = appInfo.personPK ?? 39950
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=2&key=_")!)
+                        .navigationTitle("Attendance – Sem 1").inlineNavigationBarTitle()) {
+                        Label("Attendance – Semester 1", systemImage: "doc.text")
+                    }
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=6&key=_")!)
+                        .navigationTitle("Attendance – Sem 2").inlineNavigationBarTitle()) {
+                        Label("Attendance – Semester 2", systemImage: "doc.text")
+                    }
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/report_card/8231?grading_period=2&pad=32941")!)
+                        .navigationTitle("Report Card – Sem 1").inlineNavigationBarTitle()) {
+                        Label("Report Card – Semester 1", systemImage: "doc.richtext")
+                    }
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/report_card/8231?grading_period=6&pad=32941")!)
+                        .navigationTitle("Report Card – Sem 2").inlineNavigationBarTitle()) {
+                        Label("Report Card – Semester 2", systemImage: "doc.richtext")
+                    }
+                }
+                .onAppear {
+                    if appInfo.personPK == nil { Task { await appInfo.fetchPersonPK() } }
                 }
 
                 if !entries.isEmpty {

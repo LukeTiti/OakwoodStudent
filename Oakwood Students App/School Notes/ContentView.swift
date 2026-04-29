@@ -45,6 +45,15 @@ extension View {
         self
         #endif
     }
+
+    @ViewBuilder
+    func unreadRowBackground(_ isUnread: Int?) -> some View {
+        if isUnread == 1 {
+            self.listRowBackground(Color.yellow.opacity(0.15))
+        } else {
+            self
+        }
+    }
 }
 
 enum AppSection: String, CaseIterable, Identifiable {
@@ -53,6 +62,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case grades = "Grades"
     case calendar = "Calendar"
     case service = "Service"
+    case directory = "Directory"
 
     var id: String { rawValue }
 
@@ -63,6 +73,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .grades: return "list.bullet.rectangle.portrait"
         case .calendar: return "calendar"
         case .service: return "heart.fill"
+        case .directory: return "person.2"
         }
     }
 
@@ -74,6 +85,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .grades: VeracrossGradesView()
         case .calendar: CalendarView()
         case .service: ServiceView()
+        case .directory: DirectoryView()
         }
     }
 }
@@ -113,6 +125,9 @@ struct ContentView: View {
             }
             Tab("Service", systemImage: "heart.fill", value: "Service") {
                 ServiceView()
+            }
+            Tab("Directory", systemImage: "person.2", value: "Directory") {
+                DirectoryView()
             }
             Tab("Quick Links", systemImage: "link", value: "Quick Links") {
                 QuickLinks()
