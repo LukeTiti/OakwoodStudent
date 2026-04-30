@@ -42,7 +42,7 @@ struct DirectoryContact: Identifiable {
 
 // MARK: - Scraping
 
-private func fetchDirectoryPage1(queryItems: [URLQueryItem]) async -> ([DirectoryPerson], String?) {
+func fetchDirectoryPage1(queryItems: [URLQueryItem]) async -> ([DirectoryPerson], String?) {
     var components = URLComponents(string: "https://portals.veracross.com/oakwood/student/directory/1")!
     if !queryItems.isEmpty { components.queryItems = queryItems }
     guard let url = components.url,

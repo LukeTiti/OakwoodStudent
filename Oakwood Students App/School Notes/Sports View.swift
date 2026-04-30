@@ -76,13 +76,15 @@ struct SchoolEvent: Identifiable, Hashable {
 enum CalendarItem: Identifiable, Hashable {
     case sports(SportsEvent)
     case school(SchoolEvent)
-    case personal(SchoolEvent)
+    case personal(SchoolEvent)   // classes — only in My Day
+    case practice(SchoolEvent)   // practice calendar — shown in main list
 
     var id: String {
         switch self {
         case .sports(let e): return e.id
         case .school(let e): return "school-\(e.id)"
         case .personal(let e): return "personal-\(e.id)"
+        case .practice(let e): return "practice-\(e.id)"
         }
     }
 
@@ -91,6 +93,7 @@ enum CalendarItem: Identifiable, Hashable {
         case .sports(let e): return e.date
         case .school(let e): return e.date
         case .personal(let e): return e.date
+        case .practice(let e): return e.date
         }
     }
 
@@ -99,6 +102,7 @@ enum CalendarItem: Identifiable, Hashable {
         case .sports(let e): return e.sportName
         case .school: return "School Events"
         case .personal: return "My Schedule"
+        case .practice: return "Practices"
         }
     }
 }
@@ -462,6 +466,10 @@ struct DayDetailView: View {
                     NavigationLink(destination: SchoolEventDetailView(event: event)) {
                         SchoolEventRow(event: event)
                     }
+                case .practice(let event):
+                    NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                        PersonalEventRow(event: event)
+                    }
                 }
             }
         }
@@ -514,6 +522,7 @@ struct CalendarView: View {
     @State private var selectedTab = 0
     @State private var showingFilter = false
     @State private var selectedDay: DaySelection? = nil
+    @State private var showAddCalendar = false
     @State private var selectedCategories: Set<String> = {
         guard let data = UserDefaults.standard.data(forKey: "selectedCategories"),
               let cats = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
@@ -529,7 +538,7 @@ struct CalendarView: View {
 
     var filteredItems: [CalendarItem] {
         let today = Calendar.current.startOfDay(for: Date())
-        var filtered = appInfo.calendarItems.filter { if case .personal = $0 { return false }; return true }
+        var filtered = appInfo.calendarItems.filter { if case .personal = $0 { return false }; return true; }
         if !selectedCategories.isEmpty { filtered = filtered.filter { selectedCategories.contains($0.category) } }
         filtered = selectedTab == 0 ? filtered.filter { $0.date >= today } : filtered.filter { $0.date < today }
         return filtered
@@ -538,28 +547,41 @@ struct CalendarView: View {
     var personalItemsByDate: [String: [CalendarItem]] {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMM d"
+        let todayFormatter = DateFormatter()
+        todayFormatter.dateFormat = "MMMM d"
+        let cal = Calendar.current
         let personal = appInfo.calendarItems.filter { if case .personal = $0 { return true }; return false }
-        return Dictionary(grouping: personal) { formatter.string(from: $0.date) }
+        return Dictionary(grouping: personal) { item in
+            cal.isDateInToday(item.date) ? "Today, \(todayFormatter.string(from: item.date))" : formatter.string(from: item.date)
+        }
     }
 
     var groupedItems: [(String, [CalendarItem])] {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMM d"
-        let today = Calendar.current.startOfDay(for: Date())
+        let todayFormatter = DateFormatter()
+        todayFormatter.dateFormat = "MMMM d"
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        func dateKey(_ date: Date) -> String {
+            cal.isDateInToday(date) ? "Today, \(todayFormatter.string(from: date))" : formatter.string(from: date)
+        }
 
         var dateMap: [String: (date: Date, items: [CalendarItem])] = [:]
         for item in filteredItems {
-            let key = formatter.string(from: item.date)
+            let key = dateKey(item.date)
             if dateMap[key] == nil { dateMap[key] = (item.date, []) }
             dateMap[key]!.items.append(item)
         }
 
-        // Add dates that only have personal events (tab-filtered)
-        let allPersonal = appInfo.calendarItems.filter { if case .personal = $0 { return true }; return false }
+        // Add placeholder entries for dates that only have personal/class events so "View My Day" still appears
+        let allPersonal = appInfo.calendarItems.filter { if case .personal = $0 { return true }; return false; }
         let tabPersonal = selectedTab == 0 ? allPersonal.filter { $0.date >= today } : allPersonal.filter { $0.date < today }
         for item in tabPersonal {
-            let key = formatter.string(from: item.date)
+            let key = dateKey(item.date)
             if dateMap[key] == nil { dateMap[key] = (item.date, []) }
+            // intentionally not appending — personal items only show in My Day
         }
 
         let sorted = dateMap.sorted { $0.value.date < $1.value.date }.map { ($0.key, $0.value.items) }
@@ -581,6 +603,10 @@ struct CalendarView: View {
             NavigationLink(destination: SchoolEventDetailView(event: event)) {
                 PersonalEventRow(event: event)
             }
+        case .practice(let event):
+            NavigationLink(destination: SchoolEventDetailView(event: event)) {
+                PersonalEventRow(event: event)
+            }
         }
     }
 
@@ -590,8 +616,7 @@ struct CalendarView: View {
             Text(date)
             Spacer()
             Button {
-                let dayItems = (personalItemsByDate[date] ?? []) + items
-                selectedDay = DaySelection(dateTitle: date, items: dayItems)
+                selectedDay = DaySelection(dateTitle: date, items: (personalItemsByDate[date] ?? []) + items)
             } label: {
                 HStack(spacing: 3) {
                     Text("View My Day")
@@ -659,13 +684,22 @@ struct CalendarView: View {
             .macInsetListStyle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { showingFilter = true } label: {
-                        Image(systemName: filterIconName)
+                    Button { showingFilter = true } label: { Image(systemName: filterIconName) }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { showAddCalendar = true } label: {
+                        Image(systemName: appInfo.practiceCalendarURLs.isEmpty ? "plus" : "calendar.badge.checkmark")
                     }
                 }
             }
             .sheet(isPresented: $showingFilter) {
                 CalendarFilterView(allCategories: allCategories, selectedCategories: $selectedCategories)
+            }
+            .sheet(isPresented: $showAddCalendar) {
+                PracticeCalendarSheet(savedURLs: appInfo.practiceCalendarURLs) { updated in
+                    appInfo.practiceCalendarURLs = updated
+                    Task { await appInfo.loadAllCalendarEvents() }
+                }
             }
             .onChange(of: selectedCategories) { _, _ in
                 if let data = try? JSONEncoder().encode(selectedCategories) {
@@ -676,6 +710,56 @@ struct CalendarView: View {
         .onAppear {
             if appInfo.calendarItems.isEmpty { Task { await appInfo.loadAllCalendarEvents() } }
             else { Task { await appInfo.refreshCalendarData() } }
+        }
+    }
+}
+
+// MARK: - Practice Calendar Sheet
+
+struct PracticeCalendarSheet: View {
+    let savedURLs: [String]
+    var onSave: ([String]) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var urls: [String] = []
+    @State private var newURL = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if !urls.isEmpty {
+                    Section("Saved Calendars") {
+                        ForEach(urls, id: \.self) { url in
+                            Text(url).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                        }
+                        .onDelete { urls.remove(atOffsets: $0) }
+                    }
+                }
+                Section {
+                    TextField("webcal:// or https://", text: $newURL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    Button("Add Calendar") {
+                        let raw = newURL.trimmingCharacters(in: .whitespaces)
+                        let normalized = raw.hasPrefix("webcal://") ? "https://" + raw.dropFirst("webcal://".count) : raw
+                        guard !normalized.isEmpty, !urls.contains(normalized) else { return }
+                        urls.append(normalized)
+                        newURL = ""
+                    }
+                    .disabled(newURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                } header: {
+                    Text("Add Calendar URL")
+                } footer: {
+                    Text("Paste the iCal subscription URL for a practice schedule. Find it in the Veracross portal under your team calendar.")
+                }
+            }
+            .navigationTitle("Practice Calendars")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { onSave(urls); dismiss() } }
+            }
+            .onAppear { urls = savedURLs }
         }
     }
 }

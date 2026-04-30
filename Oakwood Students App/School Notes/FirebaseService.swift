@@ -11,7 +11,7 @@ import FirebaseFirestore
 // MARK: - FirebaseService (Handles all Firestore operations)
 class FirebaseService {
     static let shared = FirebaseService()
-    private let db = Firestore.firestore()
+    let db = Firestore.firestore()
     private init() {}
 
     // MARK: - Service Hours Forms

@@ -63,6 +63,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case calendar = "Calendar"
     case service = "Service"
     case directory = "Directory"
+    case clubs = "Clubs"
 
     var id: String { rawValue }
 
@@ -74,6 +75,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .calendar: return "calendar"
         case .service: return "heart.fill"
         case .directory: return "person.2"
+        case .clubs: return "person.3"
         }
     }
 
@@ -86,6 +88,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .calendar: CalendarView()
         case .service: ServiceView()
         case .directory: DirectoryView()
+        case .clubs: ClubsView()
         }
     }
 }
@@ -128,6 +131,9 @@ struct ContentView: View {
             }
             Tab("Directory", systemImage: "person.2", value: "Directory") {
                 DirectoryView()
+            }
+            Tab("Clubs", systemImage: "person.3", value: "Clubs") {
+                ClubsView()
             }
             Tab("Quick Links", systemImage: "link", value: "Quick Links") {
                 QuickLinks()

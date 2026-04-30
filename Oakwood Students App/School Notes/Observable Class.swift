@@ -42,6 +42,11 @@ class AppInfo: ObservableObject {
             }
         }
     }
+    @Published var practiceCalendarURLs: [String] = [] {
+        didSet {
+            UserDefaults.standard.set(practiceCalendarURLs, forKey: "practiceCalendarURLs")
+        }
+    }
 
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
@@ -76,6 +81,7 @@ class AppInfo: ObservableObject {
         loadCookies()
         loadGoogleLogin()
         personalCalendarURL = UserDefaults.standard.string(forKey: "personalCalendarURL")
+        practiceCalendarURLs = UserDefaults.standard.stringArray(forKey: "practiceCalendarURLs") ?? []
 
         // If already signed in from a previous session, save FCM token now
         #if os(iOS)
@@ -563,9 +569,10 @@ class AppInfo: ObservableObject {
         async let sportsTask = loadCalendarSportsEvents()
         async let schoolTask = loadCalendarSchoolEvents()
         async let personalTask = loadPersonalCalendarEvents()
-        let (sports, school, personal) = await (sportsTask, schoolTask, personalTask)
+        async let practiceTask = loadPracticeCalendarEvents()
+        let (sports, school, personal, practice) = await (sportsTask, schoolTask, personalTask, practiceTask)
 
-        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) } + personal.map { .personal($0) }
+        let combined: [CalendarItem] = sports.map { .sports($0) } + school.map { .school($0) } + personal.map { .personal($0) } + practice.map { .practice($0) }
         var seen = Set<String>()
         let unique = combined.filter { seen.insert($0.id).inserted }.sorted { $0.date < $1.date }
         let fetchedScores = (try? await FirebaseService.shared.fetchAllGameScores()) ?? [:]
@@ -599,6 +606,10 @@ class AppInfo: ObservableObject {
                     return WidgetCalendarEvent(id: "personal-\(e.id)", title: e.title,
                         date: e.date, timeText: e.timeText, badgeLabel: "My Schedule",
                         colorName: "indigo", location: e.location)
+                case .practice(let e):
+                    return WidgetCalendarEvent(id: "practice-\(e.id)", title: e.title,
+                        date: e.date, timeText: e.timeText, badgeLabel: "Practice",
+                        colorName: "orange", location: e.location)
                 }
             }
         if let data = try? JSONEncoder().encode(Array(upcoming)) {
@@ -609,9 +620,17 @@ class AppInfo: ObservableObject {
 
     func refreshCalendarData() async {
         async let scoresTask = FirebaseService.shared.fetchAllGameScores()
+        async let practiceTask = loadPracticeCalendarEvents()
         await loadCalendarMySignups()
         let scores = (try? await scoresTask) ?? [:]
-        await MainActor.run { calendarScores = scores }
+        let practice = await practiceTask
+        await MainActor.run {
+            calendarScores = scores
+            // Merge practice events without touching existing items
+            let practiceItems = practice.map { CalendarItem.practice($0) }
+            let nonPractice = calendarItems.filter { if case .practice = $0 { return false }; return true }
+            calendarItems = (nonPractice + practiceItems).sorted { $0.date < $1.date }
+        }
     }
 
     func loadCalendarMySignups() async {
@@ -694,6 +713,36 @@ class AppInfo: ObservableObject {
                 location: location, description: ""
             )
         }
+    }
+
+    func loadPracticeCalendarEvents() async -> [SchoolEvent] {
+        guard !practiceCalendarURLs.isEmpty else { return [] }
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        let results = await withTaskGroup(of: [SchoolEvent].self) { group in
+            for urlString in practiceCalendarURLs {
+                group.addTask {
+                    guard let url = URL(string: urlString),
+                          let (data, _) = try? await URLSession.shared.data(from: url),
+                          let ics = String(data: data, encoding: .utf8) else { return [] }
+                    return self.parseICalRecords(ics).compactMap { record -> SchoolEvent? in
+                        guard let uid = record["UID"], let summary = record["SUMMARY"], let dtstart = record["DTSTART"] else { return nil }
+                        // TeamSnap exports local times with a Z suffix — strip it so they parse as device local time
+                        let date = self.parseICalDate(dtstart.replacingOccurrences(of: "Z", with: ""))
+                        let endDate = record["DTEND"].flatMap { self.parseICalDate($0.replacingOccurrences(of: "Z", with: "")) }
+                        let location = record["LOCATION"]?.replacingOccurrences(of: "\\,", with: ",") ?? ""
+                        return SchoolEvent(id: "practice-\(uid)", title: summary, date: date,
+                            startTime: timeFormatter.string(from: date),
+                            endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
+                            location: location, description: "")
+                    }
+                }
+            }
+            var all: [SchoolEvent] = []
+            for await batch in group { all += batch }
+            return all
+        }
+        return results
     }
 
     func loadCalendarSchoolEvents() async -> [SchoolEvent] {
