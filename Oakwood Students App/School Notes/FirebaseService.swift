@@ -16,18 +16,22 @@ class FirebaseService {
 
     // MARK: - Service Hours Forms
 
-    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String) async throws {
+    @discardableResult
+    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, supervisorName: String, supervisorEmail: String) async throws -> String {
         let data: [String: Any] = [
             "studentId": studentId,
             "studentName": studentName,
             "title": form.title,
-            "status": "pending",
+            "status": "pending_signature",
             "submittedAt": Timestamp(date: form.dateCreated),
             "totalHours": form.services.reduce(0) { $0 + $1.hours },
             "reflection1": form.reflection1,
             "reflection2": form.reflection2,
             "reflection3": form.reflection3,
             "taxID": form.taxID ?? "",
+            "supervisorName": supervisorName,
+            "supervisorEmail": supervisorEmail,
+            "supervisorSignature": "",
             "services": form.services.map { [
                 "date": $0.date,
                 "notes": $0.notes,
@@ -35,7 +39,12 @@ class FirebaseService {
                 "description": $0.description
             ]}
         ]
-        try await db.collection("serviceForms").addDocument(data: data)
+        let ref = try await db.collection("serviceForms").addDocument(data: data)
+        return ref.documentID
+    }
+
+    func submitFormToAdvisor(formId: String) async throws {
+        try await db.collection("serviceForms").document(formId).updateData(["status": "submitted"])
     }
 
     func fetchMyServiceForms(studentId: String) async throws -> [SubmittedForm] {
@@ -45,32 +54,32 @@ class FirebaseService {
             .whereField("studentId", isEqualTo: studentId)
             .getDocuments()
 
-        let forms = snapshot.documents.compactMap { doc -> SubmittedForm? in
-            let data = doc.data()
-            let servicesData = data["services"] as? [[String: Any]] ?? []
-            let services = servicesData.map { s in
-                LocalService(
-                    date: s["date"] as? String ?? "",
-                    description: s["description"] as? String ?? "",
-                    notes: s["notes"] as? String ?? "",
-                    hours: s["hours"] as? Double ?? 0
-                )
-            }
-            return SubmittedForm(
-                id: doc.documentID,
-                title: data["title"] as? String ?? "Untitled",
-                status: data["status"] as? String ?? "pending",
-                submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date(),
-                totalHours: data["totalHours"] as? Double ?? 0,
-                reflection1: data["reflection1"] as? String ?? "",
-                reflection2: data["reflection2"] as? String ?? "",
-                reflection3: data["reflection3"] as? String ?? "",
-                taxID: data["taxID"] as? String ?? "",
-                services: services
-            )
-        }
-        // Sort by date descending (newest first) in memory
+        let forms = snapshot.documents.compactMap { parseSubmittedForm($0) }
         return forms.sorted { $0.submittedAt > $1.submittedAt }
+    }
+
+    func parseSubmittedForm(_ doc: QueryDocumentSnapshot) -> SubmittedForm? {
+        let data = doc.data()
+        let services = (data["services"] as? [[String: Any]] ?? []).map { s in
+            LocalService(date: s["date"] as? String ?? "", description: s["description"] as? String ?? "",
+                         notes: s["notes"] as? String ?? "", hours: s["hours"] as? Double ?? 0)
+        }
+        return SubmittedForm(
+            id: doc.documentID,
+            title: data["title"] as? String ?? "Untitled",
+            status: data["status"] as? String ?? "pending_signature",
+            submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date(),
+            totalHours: data["totalHours"] as? Double ?? 0,
+            reflection1: data["reflection1"] as? String ?? "",
+            reflection2: data["reflection2"] as? String ?? "",
+            reflection3: data["reflection3"] as? String ?? "",
+            taxID: data["taxID"] as? String ?? "",
+            services: services,
+            supervisorName: data["supervisorName"] as? String ?? "",
+            supervisorEmail: data["supervisorEmail"] as? String ?? "",
+            supervisorSignature: data["supervisorSignature"] as? String ?? "",
+            signedAt: (data["signedAt"] as? Timestamp)?.dateValue()
+        )
     }
 
     // MARK: - Real-time listener for form status updates
@@ -79,31 +88,7 @@ class FirebaseService {
             .whereField("studentId", isEqualTo: studentId)
             .addSnapshotListener { snapshot, error in
                 guard let documents = snapshot?.documents else { return }
-                let forms = documents.compactMap { doc -> SubmittedForm? in
-                    let data = doc.data()
-                    let servicesData = data["services"] as? [[String: Any]] ?? []
-                    let services = servicesData.map { s in
-                        LocalService(
-                            date: s["date"] as? String ?? "",
-                            description: s["description"] as? String ?? "",
-                            notes: s["notes"] as? String ?? "",
-                            hours: s["hours"] as? Double ?? 0
-                        )
-                    }
-                    return SubmittedForm(
-                        id: doc.documentID,
-                        title: data["title"] as? String ?? "Untitled",
-                        status: data["status"] as? String ?? "pending",
-                        submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date(),
-                        totalHours: data["totalHours"] as? Double ?? 0,
-                        reflection1: data["reflection1"] as? String ?? "",
-                        reflection2: data["reflection2"] as? String ?? "",
-                        reflection3: data["reflection3"] as? String ?? "",
-                        taxID: data["taxID"] as? String ?? "",
-                        services: services
-                    )
-                }
-                // Sort by date descending (newest first) in memory
+                let forms = documents.compactMap { self.parseSubmittedForm($0) }
                 onChange(forms.sorted { $0.submittedAt > $1.submittedAt })
             }
     }
@@ -113,7 +98,7 @@ class FirebaseService {
 struct SubmittedForm: Identifiable {
     var id: String
     var title: String
-    var status: String          // "pending", "approved", "rejected"
+    var status: String  // "pending_signature" | "signed" | "submitted" | "approved"
     var submittedAt: Date
     var totalHours: Double
     var reflection1: String
@@ -121,6 +106,10 @@ struct SubmittedForm: Identifiable {
     var reflection3: String
     var taxID: String
     var services: [LocalService]
+    var supervisorName: String
+    var supervisorEmail: String
+    var supervisorSignature: String
+    var signedAt: Date?
 }
 
 // MARK: - App Banner

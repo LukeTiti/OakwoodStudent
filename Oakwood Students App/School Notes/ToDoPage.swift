@@ -13,6 +13,7 @@ struct ToDoPage: View {
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
 
+    @State private var showNTIs = false
     @State private var showToast = false
     @State private var toastScoreId = 0
     @State private var toastDismissTask: Task<Void, Never>?
@@ -67,6 +68,12 @@ struct ToDoPage: View {
     private func assignmentsDue(dayOffset: Int) -> [(assignment: Assignment, courseName: String)] {
         guard let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) else { return [] }
         return filteredAssignments.filter { Calendar.current.isDate($0.assignment.dueDate ?? .distantFuture, inSameDayAs: targetDate) }
+    }
+
+    private var ntiAssignments: [(assignment: Assignment, courseName: String)] {
+        allPairs
+            .filter { $0.assignment.assignment_description.range(of: "\\bNTI\\b", options: [.regularExpression, .caseInsensitive]) != nil }
+            .sorted { ($0.assignment.dueDate ?? .distantFuture) > ($1.assignment.dueDate ?? .distantFuture) }
     }
 
     private var pastDueAssignments: [(assignment: Assignment, courseName: String)] {
@@ -128,14 +135,19 @@ struct ToDoPage: View {
                         Text(showAll ? "Hide Done" : "Show All")
                     }
                 }
-
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .confirmationAction) {
+                    Button("NTIs") { showNTIs = true }
+                        .foregroundColor(.orange)
                     Button {
                         showAddAssignment = true
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            .sheet(isPresented: $showNTIs) {
+                NTIListSheet(assignments: ntiAssignments)
+                    .environmentObject(appInfo)
             }
             .sheet(isPresented: $showAddAssignment) {
                 AddAssignmentSheet()
@@ -594,6 +606,74 @@ struct AddResourceSheet: View {
             onSubmit()
             dismiss()
         }
+    }
+}
+
+// MARK: - NTI List Sheet
+
+struct NTIListSheet: View {
+    @EnvironmentObject var appInfo: AppInfo
+    @Environment(\.dismiss) private var dismiss
+    let assignments: [(assignment: Assignment, courseName: String)]
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if assignments.isEmpty {
+                    ContentUnavailableView("No NTI Assignments", systemImage: "checkmark.circle", description: Text("No assignments with \"NTI\" in the title were found."))
+                } else {
+                    List {
+                        ForEach(assignments, id: \.assignment.score_id) { item in
+                            NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
+                                NTIAssignmentRow(assignment: item.assignment, courseName: item.courseName)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("NTI Assignments")
+            .inlineNavigationBarTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
+struct NTIAssignmentRow: View {
+    let assignment: Assignment
+    let courseName: String
+    @EnvironmentObject var appInfo: AppInfo
+
+    private var isCompleted: Bool { appInfo.info[assignment.score_id, default: false] }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(assignment.assignment_description)
+                        .font(.body)
+                        .strikethrough(isCompleted, color: .secondary)
+                        .foregroundColor(isCompleted ? .secondary : .primary)
+                        .lineLimit(2)
+                    if isCompleted {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text(courseName).font(.caption).foregroundColor(.secondary)
+                    if let due = assignment.due_date, !due.isEmpty {
+                        Text("·").foregroundColor(.secondary).font(.caption)
+                        Text(due).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .opacity(isCompleted ? 0.7 : 1)
     }
 }
 

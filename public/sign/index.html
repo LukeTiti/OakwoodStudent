@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign Service Hours Form — Oakwood School</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f2f2f7; color: #1c1c1e; min-height: 100vh; padding: 24px 16px; }
+    .card { background: white; border-radius: 16px; max-width: 600px; margin: 0 auto; padding: 28px 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { font-size: 14px; color: #636366; margin-bottom: 24px; }
+    .section-title { font-size: 12px; font-weight: 600; color: #636366; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px; }
+    .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f2f2f7; font-size: 15px; }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: #636366; }
+    .service-entry { padding: 10px 0; border-bottom: 1px solid #f2f2f7; }
+    .service-entry:last-child { border-bottom: none; }
+    .service-name { font-size: 15px; font-weight: 500; }
+    .service-meta { font-size: 13px; color: #636366; margin-top: 2px; }
+    .reflection { background: #f9f9fb; border-radius: 10px; padding: 12px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
+    .reflection-label { font-size: 12px; color: #636366; margin-bottom: 4px; font-weight: 500; }
+    .sign-section { margin-top: 28px; padding-top: 24px; border-top: 2px solid #f2f2f7; }
+    .sign-section h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+    .sign-section p { font-size: 14px; color: #636366; margin-bottom: 16px; line-height: 1.5; }
+    input[type="text"] { width: 100%; border: 1.5px solid #d1d1d6; border-radius: 10px; padding: 12px 14px; font-size: 16px; outline: none; transition: border-color 0.2s; }
+    input[type="text"]:focus { border-color: #007aff; }
+    .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; font-size: 14px; color: #3a3a3c; line-height: 1.5; }
+    .checkbox-row input { margin-top: 2px; width: 18px; height: 18px; flex-shrink: 0; accent-color: #007aff; }
+    button { width: 100%; background: #007aff; color: white; border: none; border-radius: 12px; padding: 14px; font-size: 17px; font-weight: 600; cursor: pointer; margin-top: 16px; transition: opacity 0.15s; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .status { text-align: center; padding: 40px 20px; }
+    .status-icon { font-size: 56px; margin-bottom: 16px; }
+    .status h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .status p { font-size: 15px; color: #636366; }
+    .error { color: #ff3b30; font-size: 14px; margin-top: 10px; text-align: center; }
+    .loading { text-align: center; padding: 60px 20px; color: #636366; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="app">
+    <div class="loading">Loading form…</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyC_placeholder_replace_with_real_key",
+      authDomain: "oakwoodstudents-d9495.firebaseapp.com",
+      projectId: "oakwoodstudents-d9495",
+      storageBucket: "oakwoodstudents-d9495.appspot.com",
+      messagingSenderId: "placeholder",
+      appId: "placeholder"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Get document ID from URL path: /sign/DOCID
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    const docId = parts[parts.length - 1];
+    const app_el = document.getElementById("app");
+
+    async function load() {
+      if (!docId || docId === "sign") { showError("Invalid signing link."); return; }
+
+      const ref = doc(db, "serviceForms", docId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) { showError("Form not found. This link may have expired."); return; }
+
+      const d = snap.data();
+
+      if (d.status === "signed" || d.status === "submitted" || d.status === "approved") {
+        showAlreadySigned(d);
+        return;
+      }
+
+      if (d.status !== "pending_signature") {
+        showError("This form is not currently awaiting a signature.");
+        return;
+      }
+
+      renderForm(d, ref);
+    }
+
+    function renderForm(d, ref) {
+      const services = (d.services || []).map(s => `
+        <div class="service-entry">
+          <div class="service-name">${esc(s.notes)} <span style="float:right;color:#636366">${s.hours} hrs</span></div>
+          <div class="service-meta">${esc(s.date)} · ${esc(s.description)}</div>
+        </div>`).join("");
+
+      const reflections = [d.reflection1, d.reflection2, d.reflection3]
+        .filter(r => r && r.trim())
+        .map((r, i) => `<div class="reflection-label">Reflection ${i+1}</div><div class="reflection">${esc(r)}</div>`)
+        .join("");
+
+      app_el.innerHTML = `
+        <h1>${esc(d.title)}</h1>
+        <div class="subtitle">Oakwood School · Community Service Form</div>
+
+        <div class="section-title">Student</div>
+        <div class="info-row"><span class="info-label">Name</span><span>${esc(d.studentName)}</span></div>
+        <div class="info-row"><span class="info-label">Total Hours</span><span><strong>${d.totalHours} hrs</strong></span></div>
+        <div class="info-row"><span class="info-label">Date Submitted</span><span>${new Date(d.submittedAt?.seconds * 1000).toLocaleDateString()}</span></div>
+
+        <div class="section-title">Service Entries</div>
+        ${services}
+
+        ${reflections ? `<div class="section-title">Reflections</div>${reflections}` : ""}
+
+        <div class="sign-section">
+          <h2>Electronic Signature</h2>
+          <p>By typing your full name and checking the box below, you certify that the service hours listed above are accurate to the best of your knowledge.</p>
+          <input type="text" id="sigName" placeholder="Your full name" oninput="updateBtn()" />
+          <div class="checkbox-row">
+            <input type="checkbox" id="certify" onchange="updateBtn()" />
+            <label for="certify">I certify that the information above is accurate and I approve these service hours for ${esc(d.studentName)}.</label>
+          </div>
+          <button id="signBtn" disabled onclick="sign('${docId}', '${esc(d.supervisorName)}')">Sign Form</button>
+          <div class="error" id="errMsg"></div>
+        </div>`;
+    }
+
+    window.updateBtn = function() {
+      const name = document.getElementById("sigName")?.value.trim();
+      const checked = document.getElementById("certify")?.checked;
+      const btn = document.getElementById("signBtn");
+      if (btn) btn.disabled = !(name && checked);
+    };
+
+    window.sign = async function(docId, supervisorName) {
+      const btn = document.getElementById("signBtn");
+      const name = document.getElementById("sigName").value.trim();
+      btn.disabled = true; btn.textContent = "Signing…";
+      try {
+        const ref = doc(db, "serviceForms", docId);
+        await updateDoc(ref, {
+          supervisorSignature: name,
+          signedAt: serverTimestamp(),
+          status: "signed"
+        });
+        showSuccess(name);
+      } catch(e) {
+        document.getElementById("errMsg").textContent = "Failed to submit signature. Please try again.";
+        btn.disabled = false; btn.textContent = "Sign Form";
+      }
+    };
+
+    function showSuccess(name) {
+      app_el.innerHTML = `
+        <div class="status">
+          <div class="status-icon">✅</div>
+          <h2>Form Signed</h2>
+          <p>Thank you, ${esc(name)}. The student will be notified and can now submit their form to their advisor.</p>
+        </div>`;
+    }
+
+    function showAlreadySigned(d) {
+      app_el.innerHTML = `
+        <div class="status">
+          <div class="status-icon">✅</div>
+          <h2>Already Signed</h2>
+          <p>This form was signed by <strong>${esc(d.supervisorSignature)}</strong>. No further action is needed.</p>
+        </div>`;
+    }
+
+    function showError(msg) {
+      app_el.innerHTML = `
+        <div class="status">
+          <div class="status-icon">❌</div>
+          <h2>Error</h2>
+          <p>${msg}</p>
+        </div>`;
+    }
+
+    function esc(str) {
+      return (str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,4 +1,11 @@
 {
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/sign/**", "destination": "/sign/index.html" }
+    ]
+  },
   "functions": [
     {
       "source": "functions",
