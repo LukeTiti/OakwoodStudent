@@ -72,7 +72,7 @@ struct ToDoPage: View {
 
     private var ntiAssignments: [(assignment: Assignment, courseName: String)] {
         allPairs
-            .filter { $0.assignment.assignment_description.range(of: "\\bNTI\\b", options: [.regularExpression, .caseInsensitive]) != nil }
+            .filter { $0.assignment.completion_status?.caseInsensitiveCompare("Not Turned In") == .orderedSame }
             .sorted { ($0.assignment.dueDate ?? .distantFuture) > ($1.assignment.dueDate ?? .distantFuture) }
     }
 
@@ -620,7 +620,7 @@ struct NTIListSheet: View {
         NavigationStack {
             Group {
                 if assignments.isEmpty {
-                    ContentUnavailableView("No NTI Assignments", systemImage: "checkmark.circle", description: Text("No assignments with \"NTI\" in the title were found."))
+                    ContentUnavailableView("No NTI Assignments", systemImage: "checkmark.circle", description: Text("No assignments marked \"Not Turned In\" were found."))
                 } else {
                     List {
                         ForEach(assignments, id: \.assignment.score_id) { item in

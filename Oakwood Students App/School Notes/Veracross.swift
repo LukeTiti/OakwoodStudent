@@ -330,9 +330,13 @@ struct GradeHeaderView: View {
         let graded = assignments
             .compactMap { a -> (date: Date, earned: Double, possible: Double, name: String, score: String)? in
                 guard let date = a.dueDate,
-                      let earned = Double(a.raw_score ?? ""),
                       let max = a.maximum_score, max > 0 else { return nil }
-                return (date, earned, Double(max), a.assignment_description, "\(a.raw_score!)/\(max)")
+                if let earned = Double(a.raw_score ?? "") {
+                    return (date, earned, Double(max), a.assignment_description, "\(a.raw_score!)/\(max)")
+                } else if a.completion_status?.caseInsensitiveCompare("Not Turned In") == .orderedSame {
+                    return (date, 0.0, Double(max), a.assignment_description, "NTI/\(max)")
+                }
+                return nil
             }
             .sorted { $0.date < $1.date }
 
@@ -363,7 +367,7 @@ struct GradeHeaderView: View {
             lastItemDate = item.date
 
             let plotDate = sameDayCount > 0
-                ? (cal.date(byAdding: .day, value: sameDayCount * 2, to: item.date) ?? item.date)
+                ? (cal.date(byAdding: .hour, value: sameDayCount * 4, to: item.date) ?? item.date)
                 : item.date
 
             points.append(GradePoint(date: plotDate, percent: pct, name: item.name, score: item.score))
