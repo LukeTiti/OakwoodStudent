@@ -77,6 +77,7 @@ class AppInfo: ObservableObject {
     init() {
         loadCachedCourses()
         loadAssignmentInfo()
+        loadBundledGrades()
         loadCustomAssignments()
         loadCookies()
         loadGoogleLogin()
@@ -116,6 +117,46 @@ class AppInfo: ObservableObject {
            let decoded = try? JSONDecoder().decode([Course].self, from: data) {
             courses = decoded
         }
+    }
+
+    let isBundledMode: Bool = Bundle.main.url(forResource: "load_data", withExtension: "json") != nil
+
+    private func loadBundledGrades() {
+        guard let coursesURL = Bundle.main.url(forResource: "load_data", withExtension: "json"),
+              let coursesData = try? Data(contentsOf: coursesURL),
+              let response = try? JSONDecoder().decode(CoursesResponse.self, from: coursesData) else { return }
+
+        var loadedCourses = response.courses
+        for i in loadedCourses.indices {
+            let name = i == 0 ? "assignments" : "assignments\(i)"
+            guard let url = Bundle.main.url(forResource: name, withExtension: "json"),
+                  let data = try? Data(contentsOf: url),
+                  let aResponse = try? JSONDecoder().decode(AssignmentResponse.self, from: data) else { continue }
+            let byID = Dictionary(grouping: aResponse.attachments ?? []) { $0.assignment_id }
+            var assignments = aResponse.assignments
+            for j in assignments.indices {
+                if let id = assignments[j].assignment_id { assignments[j].attachments = byID[id] }
+            }
+            loadedCourses[i].assignments = assignments
+        }
+        courses = loadedCourses
+
+        // One-time reset: seed info from bundled data so stale school-year completion
+        // status doesn't hide future assignments.
+        let seededKey = "bundledInfoSeededV2"
+        guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
+        let now = Date()
+        var fresh: [Int: Bool] = [:]
+        for course in loadedCourses {
+            for a in course.assignments ?? [] {
+                let isPast = (a.dueDate ?? .distantFuture) < now
+                let hasGrade = a.raw_score.map { !$0.isEmpty } ?? false
+                let turnedIn = a.completion_status?.hasPrefix("Turned In") ?? false
+                fresh[a.score_id] = hasGrade || turnedIn || isPast
+            }
+        }
+        info = fresh
+        UserDefaults.standard.set(true, forKey: seededKey)
     }
 
     private func saveAssignmentInfo() {

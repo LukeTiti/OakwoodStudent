@@ -170,8 +170,10 @@ struct ToDoPage: View {
                         return
                     }
                 }
-                if let err = await appInfo.loadAllAssignments() {
-                    errorMessage = err
+                if !appInfo.isBundledMode {
+                    if let err = await appInfo.loadAllAssignments() {
+                        errorMessage = err
+                    }
                 }
                 await appInfo.loadResourceAssignmentIds()
                 if !hasMarkedPastAssignments {
