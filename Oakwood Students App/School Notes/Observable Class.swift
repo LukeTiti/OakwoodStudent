@@ -6,6 +6,8 @@
 //
 import SwiftUI
 import Combine
+import AppIntents
+import CoreSpotlight
 import GoogleSignIn
 import WebKit
 import SwiftSoup
@@ -141,22 +143,8 @@ class AppInfo: ObservableObject {
         }
         courses = loadedCourses
 
-        // One-time reset: seed info from bundled data so stale school-year completion
-        // status doesn't hide future assignments.
-        let seededKey = "bundledInfoSeededV2"
-        guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
-        let now = Date()
-        var fresh: [Int: Bool] = [:]
-        for course in loadedCourses {
-            for a in course.assignments ?? [] {
-                let isPast = (a.dueDate ?? .distantFuture) < now
-                let hasGrade = a.raw_score.map { !$0.isEmpty } ?? false
-                let turnedIn = a.completion_status?.hasPrefix("Turned In") ?? false
-                fresh[a.score_id] = hasGrade || turnedIn || isPast
-            }
-        }
-        info = fresh
-        UserDefaults.standard.set(true, forKey: seededKey)
+        let capturedInfo = info
+        Task { await AppInfo.indexEntities(courses: loadedCourses, info: capturedInfo) }
     }
 
     private func saveAssignmentInfo() {
@@ -475,7 +463,28 @@ class AppInfo: ObservableObject {
             }
         }
         await MainActor.run { saveAssignmentsForWidget() }
+        let snapshot = await MainActor.run { (courses: self.courses, info: self.info) }
+        Task { await AppInfo.indexEntities(courses: snapshot.courses, info: snapshot.info) }
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    static func indexEntities(courses: [Course], info: [Int: Bool]) async {
+        let assignments = courses.flatMap { course in
+            (course.assignments ?? []).map { assignment -> AssignmentEntity in
+                let done: Bool
+                if let explicit = info[assignment.score_id] {
+                    done = explicit
+                } else {
+                    let hasGrade = assignment.raw_score.map { !$0.isEmpty } ?? false
+                    let turnedIn = assignment.completion_status?.hasPrefix("Turned In") ?? false
+                    done = hasGrade || turnedIn
+                }
+                return AssignmentEntity(assignment: assignment, course: course, isCompleted: done)
+            }
+        }
+        let courseEntities = courses.map(CourseEntity.init)
+        try? await CSSearchableIndex.default().indexAppEntities(assignments)
+        try? await CSSearchableIndex.default().indexAppEntities(courseEntities)
     }
 
     func saveAssignmentsForWidget() {

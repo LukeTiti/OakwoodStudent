@@ -21,6 +21,8 @@
 		0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */ = {isa = PBXBuildFile; productRef = 0668365C2E6BDE4800C7F530 /* iCalendarParser */; };
 		06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690AF2E723BFE0050E087 /* GoogleSignIn */; };
 		06A690B22E723BFE0050E087 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690B12E723BFE0050E087 /* GoogleSignInSwift */; };
+		06CCEF762FE282FB00B12D89 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06CCEF752FE282FB00B12D89 /* AppIntents.framework */; };
+		06CCEF782FE2832500B12D89 /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06CCEF772FE2832500B12D89 /* CoreSpotlight.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +71,8 @@
 		0668360C2E692ADB00C7F530 /* OW Students.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OW Students.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		0668361B2E692ADD00C7F530 /* School NotesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		066836252E692ADD00C7F530 /* School NotesUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "School NotesUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		06CCEF752FE282FB00B12D89 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk/System/Library/Frameworks/AppIntents.framework; sourceTree = DEVELOPER_DIR; };
+		06CCEF772FE2832500B12D89 /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk/System/Library/Frameworks/CoreSpotlight.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -133,8 +137,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				06CCEF782FE2832500B12D89 /* CoreSpotlight.framework in Frameworks */,
 				0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */,
 				0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */,
+				06CCEF762FE282FB00B12D89 /* AppIntents.framework in Frameworks */,
 				0651E82F2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport in Frameworks */,
 				0651E8352F2E4BEE00098F78 /* FirebaseFirestore in Frameworks */,
 				0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */,
@@ -167,6 +173,8 @@
 		064307CA2F731C12004558A6 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				06CCEF772FE2832500B12D89 /* CoreSpotlight.framework */,
+				06CCEF752FE282FB00B12D89 /* AppIntents.framework */,
 				064308762F81F751004558A6 /* WidgetKit.framework */,
 				064308782F81F751004558A6 /* SwiftUI.framework */,
 			);
@@ -451,7 +459,7 @@
 				INFOPLIST_FILE = CalendarWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CalendarWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -484,7 +492,7 @@
 				INFOPLIST_FILE = CalendarWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CalendarWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -658,10 +666,10 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
 				PRODUCT_NAME = "OW Students";
@@ -717,10 +725,10 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
 				PRODUCT_NAME = "OW Students";
