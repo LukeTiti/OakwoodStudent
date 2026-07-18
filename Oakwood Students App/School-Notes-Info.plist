@@ -10,11 +10,15 @@
 	<array>
 		<dict>
 			<key>CFBundleIdentifier</key>
-			<string></string>
+			<string>com.luketiti.School-Notes</string>
 			<key>CFBundleTypeRole</key>
-			<string>None</string>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>Oakwood Deep Link</string>
 			<key>CFBundleURLSchemes</key>
-			<array/>
+			<array>
+				<string>oakwood</string>
+			</array>
 		</dict>
 		<dict>
 			<key>CFBundleTypeRole</key>

@@ -50,6 +50,10 @@ class AppInfo: ObservableObject {
         }
     }
 
+    // MARK: - Navigation / Deep Link
+    @Published var selectedTab: String = "Grades"
+    @Published var pendingAssignmentId: Int? = nil
+
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
     @Published var calendarScores: [String: GameScore] = [:]
@@ -110,12 +114,12 @@ class AppInfo: ObservableObject {
 
     private func saveCourses() {
         if let data = try? JSONEncoder().encode(courses) {
-            UserDefaults.standard.set(data, forKey: "cachedCourses")
+            UserDefaults(suiteName: appGroupID)?.set(data, forKey: "cachedCourses")
         }
     }
 
     private func loadCachedCourses() {
-        if let data = UserDefaults.standard.data(forKey: "cachedCourses"),
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "cachedCourses"),
            let decoded = try? JSONDecoder().decode([Course].self, from: data) {
             courses = decoded
         }
@@ -143,18 +147,26 @@ class AppInfo: ObservableObject {
         }
         courses = loadedCourses
 
+        // One-time migration: clear any info values written by old seeding logic.
+        // After this, info only contains explicit user toggles.
+        let migrateKey = "bundledInfoMigratedV1"
+        if !UserDefaults.standard.bool(forKey: migrateKey) {
+            info = [:]
+            UserDefaults.standard.set(true, forKey: migrateKey)
+        }
+
         let capturedInfo = info
         Task { await AppInfo.indexEntities(courses: loadedCourses, info: capturedInfo) }
     }
 
     private func saveAssignmentInfo() {
         if let encoded = try? JSONEncoder().encode(info) {
-            UserDefaults.standard.set(encoded, forKey: "assignmentInfo")
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfo")
         }
     }
 
     private func loadAssignmentInfo() {
-        if let data = UserDefaults.standard.data(forKey: "assignmentInfo"),
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfo"),
            let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
             info = decoded
         }
@@ -910,11 +922,7 @@ class AppInfo: ObservableObject {
         // Gather cookies from both stores
         let sharedCookies = httpStore.cookies ?? []
 
-        let wkCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-            wkStore.getAllCookies { cookies in
-                continuation.resume(returning: cookies)
-            }
-        }
+        let wkCookies: [HTTPCookie] = await wkStore.allCookies()
 
         // Merge by name+domain+path to avoid duplicates
         var merged: [String: HTTPCookie] = [:]
@@ -949,16 +957,8 @@ class AppInfo: ObservableObject {
         }
 
         // Insert into WKWebView cookie store
-        await withTaskGroup(of: Void.self) { group in
-            for cookie in cookies {
-                group.addTask {
-                    await withCheckedContinuation { cont in
-                        wkStore.setCookie(cookie) {
-                            cont.resume()
-                        }
-                    }
-                }
-            }
+        for cookie in cookies {
+            await wkStore.setCookie(cookie)
         }
     }
 }

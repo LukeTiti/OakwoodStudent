@@ -1,13 +1,10 @@
 //
-//  Directory.swift
+//  Mac_DirectoryView.swift
 //  School Notes
 //
-
 import SwiftUI
 
-// MARK: - Directory List View
-
-struct DirectoryView: View {
+struct Mac_DirectoryView: View {
     @State private var searchText = ""
     @State private var selectedGrade: String? = nil
     @State private var results: [DirectoryPerson] = []
@@ -28,32 +25,22 @@ struct DirectoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Directory")
-                .font(.largeTitle.bold())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search by name", text: $searchText)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
-                    .textInputAutocapitalization(.words)
                     .onChange(of: searchText) { _, _ in triggerSearch() }
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(10)
-            .background(Color(.systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal)
-            .padding(.top, 4)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .padding([.horizontal, .top])
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -62,18 +49,18 @@ struct DirectoryView: View {
                             selectedGrade = selectedGrade == option.value ? nil : option.value
                         } label: {
                             Text(option.label)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(selectedGrade == option.value ? Color.accentColor : Color(.systemGray5))
-                                .foregroundColor(selectedGrade == option.value ? .white : .primary)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(selectedGrade == option.value ? Color.accentColor : Color(nsColor: .controlColor))
+                                .foregroundStyle(selectedGrade == option.value ? Color.white : Color.primary)
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
             }
 
             if isLoading {
@@ -82,22 +69,23 @@ struct DirectoryView: View {
                 Spacer()
             } else if !results.isEmpty {
                 List(results) { person in
-                    NavigationLink(destination: DirectoryPersonView(person: person)) {
-                        DirectoryPersonRow(person: person)
+                    NavigationLink {
+                        Mac_DirectoryPersonView(person: person)
+                    } label: {
+                        Mac_DirectoryPersonRow(person: person)
                     }
                 }
-                .macInsetListStyle()
             } else if hasQuery {
                 Spacer()
-                Text("No results found").foregroundColor(.secondary)
+                Text("No results found").foregroundStyle(.secondary)
                 Spacer()
             } else {
                 Spacer()
-                Text("Search by name or select a grade").foregroundColor(.secondary)
+                Text("Search by name or select a grade").foregroundStyle(.secondary)
                 Spacer()
             }
         }
-        .navigationTitle("")
+        .navigationTitle("Directory")
         .onChange(of: selectedGrade) { _, _ in triggerSearch() }
     }
 
@@ -139,102 +127,94 @@ struct DirectoryView: View {
 
 // MARK: - Person Row
 
-struct DirectoryPersonRow: View {
+private struct Mac_DirectoryPersonRow: View {
     let person: DirectoryPerson
 
     var body: some View {
         HStack(spacing: 12) {
-            DirectoryPhoto(urlString: person.photoURL, size: 44)
+            Mac_DirectoryPhoto(urlString: person.photoURL, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(person.displayName).font(.body)
                 HStack(spacing: 6) {
                     if !person.grade.isEmpty {
-                        Text(person.grade).font(.caption).foregroundColor(.secondary)
+                        Text(person.grade).font(.caption).foregroundStyle(.secondary)
                     }
                     if let email = person.studentEmail {
-                        Text(email).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                        Text(email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
             }
         }
-        .padding(.vertical, 2)
-        .macRowPadding()
+        .padding(.vertical, 4)
     }
 }
 
-// MARK: - Person Detail View
+// MARK: - Person Detail
 
-struct DirectoryPersonView: View {
+private struct Mac_DirectoryPersonView: View {
     let person: DirectoryPerson
 
     var body: some View {
-        List {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 16) {
-                    DirectoryPhoto(urlString: person.photoURL, size: 72)
+                    Mac_DirectoryPhoto(urlString: person.photoURL, size: 72)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(person.displayName).font(.title3.bold())
+                        Text(person.displayName).font(.title2.weight(.bold))
                         if !person.grade.isEmpty {
-                            Text(person.grade).foregroundColor(.secondary)
+                            Text(person.grade).foregroundStyle(.secondary)
                         }
                         if let email = person.studentEmail {
-                            Button { openURL("mailto:\(email)") } label: {
-                                Text(email).font(.caption).foregroundColor(.blue)
+                            Button { openExternalURL("mailto:\(email)") } label: {
+                                Text(email).foregroundStyle(.blue)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 }
-                .padding(.vertical, 4)
-            }
 
-            ForEach(person.households) { household in
-                Section {
-                    if let address = household.address {
-                        Button {
-                            let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-                            #if os(iOS)
-                            openURL("maps://?q=\(encoded)")
-                            #elseif os(macOS)
-                            openURL("https://maps.apple.com/?q=\(encoded)")
-                            #endif
-                        } label: {
-                            Label(address, systemImage: "map")
-                                .font(.footnote)
-                                .foregroundColor(.primary)
-                                .multilineTextAlignment(.leading)
+                ForEach(person.households) { household in
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let address = household.address {
+                            Button {
+                                let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                                openExternalURL("https://maps.apple.com/?q=\(encoded)")
+                            } label: {
+                                Label(address, systemImage: "map")
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        ForEach(household.contacts) { contact in
+                            Mac_DirectoryContactRow(contact: contact)
+                        }
                     }
-                    ForEach(household.contacts) { contact in
-                        DirectoryContactRow(contact: contact)
-                    }
+                    Divider()
                 }
             }
+            .padding(24)
         }
-        .navigationTitle("")
-        .inlineNavigationBarTitle()
-        .macInsetListStyle()
+        .navigationTitle(person.displayName)
     }
 }
 
 // MARK: - Contact Row
 
-struct DirectoryContactRow: View {
+private struct Mac_DirectoryContactRow: View {
     let contact: DirectoryContact
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(contact.name).font(.body.weight(.semibold))
             if let phone = contact.phone {
-                Button { openURL("tel:\(phone.filter { $0.isNumber || $0 == "+" })") } label: {
-                    Label(phone, systemImage: "phone").font(.footnote).foregroundColor(.blue)
+                Button { openExternalURL("tel:\(phone.filter { $0.isNumber || $0 == "+" })") } label: {
+                    Label(phone, systemImage: "phone").foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
             }
             if let email = contact.email {
-                Button { openURL("mailto:\(email)") } label: {
-                    Label(email, systemImage: "envelope").font(.footnote).foregroundColor(.blue)
+                Button { openExternalURL("mailto:\(email)") } label: {
+                    Label(email, systemImage: "envelope").foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
             }
@@ -245,7 +225,7 @@ struct DirectoryContactRow: View {
 
 // MARK: - Photo Helper
 
-struct DirectoryPhoto: View {
+struct Mac_DirectoryPhoto: View {
     let urlString: String?
     let size: CGFloat
 
@@ -265,17 +245,6 @@ struct DirectoryPhoto: View {
     }
 
     private var placeholderView: some View {
-        Color(.systemGray5).overlay(Image(systemName: "person.fill").foregroundColor(.secondary))
+        Color(nsColor: .controlColor).overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
     }
-}
-
-// MARK: - URL Helper
-
-private func openURL(_ string: String) {
-    guard let url = URL(string: string) else { return }
-    #if os(iOS)
-    UIApplication.shared.open(url)
-    #elseif os(macOS)
-    NSWorkspace.shared.open(url)
-    #endif
 }

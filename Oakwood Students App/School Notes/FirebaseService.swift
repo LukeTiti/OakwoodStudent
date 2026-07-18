@@ -434,3 +434,32 @@ extension FirebaseService {
         }
     }
 }
+
+
+struct Service: Identifiable {
+    var id = UUID()
+    var date: String
+    var description: String
+    var notes: String
+    var hours: Double
+    var schoolYear: String
+}
+
+struct LocalService: Identifiable, Codable {
+    var id = UUID()
+    var date: String
+    var description: String
+    var notes: String
+    var hours: Double
+}
+
+struct ServiceForm: Identifiable, Codable {
+    var id = UUID()
+    var title: String
+    var dateCreated: Date
+    var services: [LocalService]
+    var reflection1: String
+    var reflection2: String
+    var reflection3: String
+    var taxID: String?
+}

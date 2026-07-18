@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import PDFKit
 import SwiftSoup
 import FirebaseFirestore
 import MessageUI
@@ -171,28 +170,6 @@ struct ServiceView: View {
         listener = FirebaseService.shared.listenForFormUpdates(studentId: appInfo.googleVM.userEmail) { updated in
             forms = updated
         }
-    }
-}
-
-// MARK: - ServiceFormRow
-
-struct ServiceFormRow: View {
-    let form: SubmittedForm
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(form.title).font(.body.weight(.semibold))
-                HStack(spacing: 4) {
-                    Text("\(form.totalHours, specifier: "%.1f") hrs")
-                    Text("·")
-                    Text(form.submittedAt, style: .date)
-                }
-                .font(.caption).foregroundColor(.secondary)
-            }
-            Spacer()
-            ServiceStatusBadge(status: form.status)
-        }
-        .padding(.vertical, 2)
     }
 }
 
@@ -403,66 +380,7 @@ struct CreateFormSheet: View {
 
 }
 
-// MARK: - ServiceStatusBadge
-
-struct ServiceStatusBadge: View {
-    let status: String
-    private var label: String {
-        switch status {
-        case "pending_signature": return "Awaiting Signature"
-        case "signed": return "Signed"
-        case "submitted": return "Submitted"
-        case "approved": return "Approved"
-        default: return status.capitalized
-        }
-    }
-    private var color: Color {
-        switch status {
-        case "signed": return .blue
-        case "submitted": return .orange
-        case "approved": return .green
-        default: return .secondary
-        }
-    }
-    var body: some View {
-        Text(label)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(color.opacity(0.15))
-            .foregroundColor(color)
-            .clipShape(Capsule())
-    }
-}
-
 // MARK: - Mail Composer
-
-struct MailData {
-    let to: String
-    let subject: String
-    let body: String
-}
-
-func makeSigningMailData(to email: String, supervisorName: String, studentName: String, title: String, totalHours: Double, signingURL: String) -> MailData {
-    MailData(
-        to: email,
-        subject: "Please sign: \(title) — Service Hours Form",
-        body: """
-Hi \(supervisorName),
-
-I'm requesting your signature for my community service hours form.
-
-Activity: \(title)
-Total Hours: \(String(format: "%.1f", totalHours))
-
-Please click the link below to review the details and sign electronically:
-
-\(signingURL)
-
-Thank you,
-\(studentName.isEmpty ? "Your Student" : studentName)
-"""
-    )
-}
 
 struct MailComposerView: UIViewControllerRepresentable {
     let data: MailData
@@ -552,69 +470,8 @@ struct LocalServiceRow: View {
     }
 }
 
-// MARK: - PDFViewer
-
-#if os(iOS)
-struct PDFViewer: UIViewRepresentable {
-    let url: URL
-    let appInfo: AppInfo
-    func makeUIView(context: Context) -> PDFView {
-        let v = PDFView(); v.autoScales = true
-        Task {
-            await appInfo.restorePersistedCookiesIntoStores()
-            if let (data, _) = try? await URLSession.shared.data(from: url),
-               let doc = PDFDocument(data: data) { await MainActor.run { v.document = doc } }
-        }
-        return v
-    }
-    func updateUIView(_ v: PDFView, context: Context) {}
-}
-#elseif os(macOS)
-struct PDFViewer: NSViewRepresentable {
-    let url: URL
-    let appInfo: AppInfo
-    func makeNSView(context: Context) -> PDFView {
-        let v = PDFView(); v.autoScales = true
-        Task {
-            await appInfo.restorePersistedCookiesIntoStores()
-            if let (data, _) = try? await URLSession.shared.data(from: url),
-               let doc = PDFDocument(data: data) { await MainActor.run { v.document = doc } }
-        }
-        return v
-    }
-    func updateNSView(_ v: PDFView, context: Context) {}
-}
-#endif
-
 // MARK: - Data Models
 
-struct Service: Identifiable {
-    var id = UUID()
-    var date: String
-    var description: String
-    var notes: String
-    var hours: Double
-    var schoolYear: String
-}
-
-struct LocalService: Identifiable, Codable {
-    var id = UUID()
-    var date: String
-    var description: String
-    var notes: String
-    var hours: Double
-}
-
-struct ServiceForm: Identifiable, Codable {
-    var id = UUID()
-    var title: String
-    var dateCreated: Date
-    var services: [LocalService]
-    var reflection1: String
-    var reflection2: String
-    var reflection3: String
-    var taxID: String?
-}
 
 // MARK: - Veracross Scraping
 

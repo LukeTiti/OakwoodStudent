@@ -7,55 +7,6 @@
 
 import SwiftUI
 
-// MARK: - Cross-Platform View Helpers
-extension View {
-    @ViewBuilder
-    func inlineNavigationBarTitle() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.inline)
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func largeNavigationBarTitle() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.large)
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func macInsetListStyle() -> some View {
-        #if os(macOS)
-        self.listStyle(.inset(alternatesRowBackgrounds: true))
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func macRowPadding() -> some View {
-        #if os(macOS)
-        self.padding(.vertical, 8)
-            .padding(.horizontal, 4)
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func unreadRowBackground(_ isUnread: Int?) -> some View {
-        if isUnread == 1 {
-            self.listRowBackground(Color.yellow.opacity(0.15))
-        } else {
-            self
-        }
-    }
-}
-
 enum AppSection: String, CaseIterable, Identifiable {
     case insideScoop = "Inside Scoop"
     case toDo = "To Do"
@@ -97,7 +48,7 @@ struct ContentView: View {
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
-    @State private var selectedTab = "Grades"
+    @State private var selectedTab = "Grades" // synced with appInfo.selectedTab via onOpenURL
 
     #if os(macOS)
     @State private var selectedSection: AppSection? = .insideScoop
@@ -146,6 +97,9 @@ struct ContentView: View {
             insertion: .move(edge: .trailing).combined(with: .opacity),
             removal: .opacity
         ))
+        .onChange(of: appInfo.selectedTab) { _, newTab in
+            selectedTab = newTab
+        }
         } // end else (hasCompletedOnboarding)
         #elseif os(macOS)
         NavigationSplitView {

@@ -10,7 +10,7 @@
 		064307CC2F731C12004558A6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 064307CB2F731C12004558A6 /* FirebaseMessaging */; };
 		064308772F81F751004558A6 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 064308762F81F751004558A6 /* WidgetKit.framework */; };
 		064308792F81F751004558A6 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 064308782F81F751004558A6 /* SwiftUI.framework */; };
-		064308882F81F752004558A6 /* CalendarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 064308752F81F750004558A6 /* CalendarWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		064308882F81F752004558A6 /* CalendarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 064308752F81F750004558A6 /* CalendarWidgetExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8262F2DCF1400098F78 /* FirebaseAI */; };
 		0651E8292F2DCF1400098F78 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8282F2DCF1400098F78 /* FirebaseAILogic */; };
 		0651E82B2F2DCF1400098F78 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82A2F2DCF1400098F78 /* FirebaseAnalytics */; };
@@ -92,6 +92,28 @@
 			);
 			target = 064308742F81F750004558A6 /* CalendarWidgetExtension */;
 		};
+		06CCEF7E2FE3013700B12D89 /* Exceptions for "School Notes" folder in "School Notes" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			platformFiltersByRelativePath = {
+				Clubs.swift = (ios, );
+				"Community Service.swift" = (ios, );
+				ContentView.swift = (ios, );
+				Directory.swift = (ios, );
+				Mac/Mac_CalendarView.swift = (macos, );
+				Mac/Mac_ClubsView.swift = (macos, );
+				Mac/Mac_ContentView.swift = (macos, );
+				Mac/Mac_DirectoryView.swift = (macos, );
+				Mac/Mac_GradesStatsSheet.swift = (macos, );
+				Mac/Mac_GradesView.swift = (macos, );
+				Mac/Mac_QuickLinksView.swift = (macos, );
+				Mac/Mac_ToDoView.swift = (macos, );
+				OnboardingView.swift = (ios, );
+				"Sports View.swift" = (ios, );
+				ToDoPage.swift = (ios, );
+				Veracross.swift = (ios, );
+			};
+			target = 0668360B2E692ADB00C7F530 /* School Notes */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -106,6 +128,7 @@
 		0668360E2E692ADB00C7F530 /* School Notes */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				06CCEF7E2FE3013700B12D89 /* Exceptions for "School Notes" folder in "School Notes" target */,
 				064308922F81F9EE004558A6 /* Exceptions for "School Notes" folder in "CalendarWidgetExtension" target */,
 			);
 			path = "School Notes";
@@ -430,6 +453,7 @@
 /* Begin PBXTargetDependency section */
 		064308872F81F752004558A6 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = 064308742F81F750004558A6 /* CalendarWidgetExtension */;
 			targetProxy = 064308862F81F752004558A6 /* PBXContainerItemProxy */;
 		};

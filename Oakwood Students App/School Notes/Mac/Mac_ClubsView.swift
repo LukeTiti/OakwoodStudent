@@ -1,12 +1,10 @@
 //
-//  Clubs.swift
+//  Mac_ClubsView.swift
 //  School Notes
 //
 import SwiftUI
 
-// MARK: - Clubs List View
-
-struct ClubsView: View {
+struct Mac_ClubsView: View {
     @EnvironmentObject var appInfo: AppInfo
     @State private var clubs: [Club] = []
     @State private var isLoading = false
@@ -17,37 +15,38 @@ struct ClubsView: View {
     private var isSuperAdmin: Bool { userEmail.lowercased() == superAdminEmail }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Clubs").font(.largeTitle.bold())
-                Spacer()
-                if isSuperAdmin {
-                    Button { showCreate = true } label: { Image(systemName: "plus") }.font(.title3)
-                }
-            }
-            .padding(.horizontal).padding(.top, 8).padding(.bottom, 4)
-
+        Group {
             if isLoading {
-                Spacer(); ProgressView("Loading clubs..."); Spacer()
+                ProgressView("Loading clubs…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if clubs.isEmpty {
-                Spacer(); Text("No clubs yet").foregroundColor(.secondary); Spacer()
+                ContentUnavailableView("No Clubs Yet", systemImage: "person.3")
             } else {
                 List(clubs) { club in
-                    NavigationLink(destination: ClubDetailView(club: club,
-                        onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
-                        onDelete: { clubs.removeAll { $0.id == club.id } }
-                    )) {
+                    NavigationLink {
+                        Mac_ClubDetailView(
+                            club: club,
+                            onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
+                            onDelete: { clubs.removeAll { $0.id == club.id } }
+                        )
+                    } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(club.name).font(.body.weight(.semibold))
                             let s = club.meetingScheduleDisplay
-                            if !s.isEmpty { Text(s).font(.caption).foregroundColor(.secondary) }
-                        }.padding(.vertical, 2)
+                            if !s.isEmpty { Text(s).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        .padding(.vertical, 4)
                     }
                 }
-                .refreshable { await loadClubs() }
             }
         }
-        .navigationTitle("")
+        .navigationTitle("Clubs")
+        .toolbar {
+            if isSuperAdmin {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { showCreate = true } label: { Image(systemName: "plus") }
+                }
+            }
+        }
         .alert("New Club", isPresented: $showCreate) {
             TextField("Club name", text: $newClubName)
             Button("Create") { Task { await createClub() } }
@@ -69,9 +68,9 @@ struct ClubsView: View {
     }
 }
 
-// MARK: - Club Detail View
+// MARK: - Club Detail
 
-struct ClubDetailView: View {
+struct Mac_ClubDetailView: View {
     @State var club: Club
     var onUpdate: (Club) -> Void
     var onDelete: () -> Void
@@ -96,89 +95,78 @@ struct ClubDetailView: View {
     private var pastEvents: [ClubEvent] { events.filter { $0.date < today }.reversed() }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(club.name).font(.largeTitle.bold())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal).padding(.top, 8).padding(.bottom, 4)
-
-            List {
-                // Info
-                if !club.description.isEmpty || !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
-                    Section {
-                        if !club.description.isEmpty { Text(club.description).font(.subheadline).foregroundColor(.secondary) }
-                        let s = club.meetingScheduleDisplay
-                        if !s.isEmpty { Label(s, systemImage: "clock").font(.subheadline) }
-                        if !club.meetingLocation.isEmpty { Label(club.meetingLocation, systemImage: "mappin.circle").font(.subheadline) }
-                    }
-                }
-
-                // Officers
-                if !club.officers.isEmpty {
-                    Section("Officers") {
-                        ForEach(club.officers) { o in
-                            HStack(spacing: 12) {
-                                DirectoryPhoto(urlString: o.photoURL, size: 44)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(o.name).font(.body)
-                                    Text(o.role).font(.caption).foregroundColor(.secondary)
-                                    if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundColor(.secondary) }
-                                }
-                                Spacer()
-                                if !o.email.isEmpty {
-                                    Button { openClubURL("mailto:\(o.email)") } label: {
-                                        Image(systemName: "envelope").foregroundColor(.blue)
-                                    }.buttonStyle(.plain)
-                                }
-                            }.padding(.vertical, 4)
-                        }
-                    }
-                }
-
-                // Announcements
+        List {
+            if !club.description.isEmpty || !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
                 Section {
-                    if isLoadingAnnouncements { HStack { Spacer(); ProgressView(); Spacer() } }
-                    else if announcements.isEmpty { Text("No announcements").foregroundColor(.secondary).font(.subheadline) }
-                    else {
-                        ForEach(announcements) { ann in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ann.title).font(.body.weight(.semibold))
-                                if !ann.message.isEmpty { Text(ann.message).font(.subheadline).foregroundColor(.secondary) }
-                                HStack {
-                                    Text(ann.authorName).font(.caption2).foregroundColor(.secondary)
-                                    Spacer()
-                                    Text(ann.postedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundColor(.secondary)
-                                }
+                    if !club.description.isEmpty { Text(club.description).font(.subheadline).foregroundStyle(.secondary) }
+                    let s = club.meetingScheduleDisplay
+                    if !s.isEmpty { Label(s, systemImage: "clock").font(.subheadline) }
+                    if !club.meetingLocation.isEmpty { Label(club.meetingLocation, systemImage: "mappin.circle").font(.subheadline) }
+                }
+            }
+
+            if !club.officers.isEmpty {
+                Section("Officers") {
+                    ForEach(club.officers) { o in
+                        HStack(spacing: 12) {
+                            Mac_DirectoryPhoto(urlString: o.photoURL, size: 44)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(o.name).font(.body)
+                                Text(o.role).font(.caption).foregroundStyle(.secondary)
+                                if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.secondary) }
                             }
-                            .padding(.vertical, 4)
-                            .swipeActions { if canEdit { deleteAnnouncementButton(ann) } }
-                        }
+                            Spacer()
+                            if !o.email.isEmpty {
+                                Button { openExternalURL("mailto:\(o.email)") } label: {
+                                    Image(systemName: "envelope").foregroundStyle(.blue)
+                                }.buttonStyle(.plain)
+                            }
+                        }.padding(.vertical, 4)
                     }
-                    if canEdit { Button { showAddAnnouncement = true } label: { Label("Post Announcement", systemImage: "megaphone") } }
-                } header: { Text("Announcements") }
+                }
+            }
 
-                // Upcoming Events
-                Section {
-                    if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
-                    else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundColor(.secondary).font(.subheadline) }
-                    else {
-                        ForEach(upcomingEvents) { event in
-                            ClubEventRow(event: event).swipeActions { if canEdit { eventSwipeActions(event) } }
+            Section {
+                if isLoadingAnnouncements { HStack { Spacer(); ProgressView(); Spacer() } }
+                else if announcements.isEmpty { Text("No announcements").foregroundStyle(.secondary).font(.subheadline) }
+                else {
+                    ForEach(announcements) { ann in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(ann.title).font(.body.weight(.semibold))
+                            if !ann.message.isEmpty { Text(ann.message).font(.subheadline).foregroundStyle(.secondary) }
+                            HStack {
+                                Text(ann.authorName).font(.caption2).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(ann.postedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.vertical, 4)
+                        .swipeActions { if canEdit { deleteAnnouncementButton(ann) } }
                     }
-                    if canEdit { Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") } }
-                } header: { Text("Upcoming Events") }
+                }
+                if canEdit { Button { showAddAnnouncement = true } label: { Label("Post Announcement", systemImage: "megaphone") } }
+            } header: { Text("Announcements") }
 
-                if !pastEvents.isEmpty {
-                    Section("Past Events") {
-                        ForEach(pastEvents) { event in
-                            ClubEventRow(event: event).swipeActions { if canEdit { deleteEventButton(event) } }
-                        }
+            Section {
+                if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
+                else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundStyle(.secondary).font(.subheadline) }
+                else {
+                    ForEach(upcomingEvents) { event in
+                        Mac_ClubEventRow(event: event).swipeActions { if canEdit { eventSwipeActions(event) } }
+                    }
+                }
+                if canEdit { Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") } }
+            } header: { Text("Upcoming Events") }
+
+            if !pastEvents.isEmpty {
+                Section("Past Events") {
+                    ForEach(pastEvents) { event in
+                        Mac_ClubEventRow(event: event).swipeActions { if canEdit { deleteEventButton(event) } }
                     }
                 }
             }
         }
-        .navigationTitle("")
-        .inlineNavigationBarTitle()
+        .navigationTitle(club.name)
         .toolbar {
             if canEdit {
                 ToolbarItem(placement: .confirmationAction) {
@@ -194,11 +182,26 @@ struct ClubDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showEdit) { ClubEditView(club: club) { club = $0; onUpdate($0) } }
-        .sheet(isPresented: $showManageEditors) { ClubEditorManagerView(club: $club) { Task { try? await FirebaseService.shared.updateClub(club) } } }
-        .sheet(isPresented: $showAddEvent) { ClubEventFormView(clubId: club.id, event: nil) { await loadEvents() } }
-        .sheet(item: $editingEvent) { ClubEventFormView(clubId: club.id, event: $0) { await loadEvents() } }
-        .sheet(isPresented: $showAddAnnouncement) { ClubAnnouncementFormView(clubId: club.id, authorName: appInfo.googleVM.userName) { await loadAnnouncements() } }
+        .sheet(isPresented: $showEdit) {
+            Mac_ClubEditView(club: club) { club = $0; onUpdate($0) }
+                .frame(minWidth: 480, minHeight: 480)
+        }
+        .sheet(isPresented: $showManageEditors) {
+            Mac_ClubEditorManagerView(club: $club) { Task { try? await FirebaseService.shared.updateClub(club) } }
+                .frame(minWidth: 420, minHeight: 360)
+        }
+        .sheet(isPresented: $showAddEvent) {
+            Mac_ClubEventFormView(clubId: club.id, event: nil) { await loadEvents() }
+                .frame(minWidth: 420, minHeight: 360)
+        }
+        .sheet(item: $editingEvent) { event in
+            Mac_ClubEventFormView(clubId: club.id, event: event) { await loadEvents() }
+                .frame(minWidth: 420, minHeight: 360)
+        }
+        .sheet(isPresented: $showAddAnnouncement) {
+            Mac_ClubAnnouncementFormView(clubId: club.id, authorName: appInfo.googleVM.userName) { await loadAnnouncements() }
+                .frame(minWidth: 420, minHeight: 300)
+        }
         .onAppear { Task { await loadEvents(); await loadAnnouncements() } }
     }
 
@@ -227,23 +230,23 @@ struct ClubDetailView: View {
 
 // MARK: - Club Event Row
 
-struct ClubEventRow: View {
+private struct Mac_ClubEventRow: View {
     let event: ClubEvent
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(event.title).font(.body.weight(.semibold))
-            Label(event.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar").font(.caption).foregroundColor(.secondary)
-            if !event.location.isEmpty { Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary) }
-            if !event.description.isEmpty { Text(event.description).font(.caption).foregroundColor(.secondary).lineLimit(2) }
+            Label(event.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar").font(.caption).foregroundStyle(.secondary)
+            if !event.location.isEmpty { Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundStyle(.secondary) }
+            if !event.description.isEmpty { Text(event.description).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
         }.padding(.vertical, 4)
     }
 }
 
 // MARK: - Club Edit View
 
-private let weekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+private let macClubWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
-struct ClubEditView: View {
+private struct Mac_ClubEditView: View {
     @State var club: Club
     var onSave: (Club) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -260,7 +263,7 @@ struct ClubEditView: View {
                     TextField("Description", text: $club.description, axis: .vertical).lineLimit(3...6)
                 }
                 Section("Meeting Days") {
-                    ForEach(weekDays, id: \.self) { day in
+                    ForEach(macClubWeekDays, id: \.self) { day in
                         Toggle(day, isOn: Binding(
                             get: { club.meetingDays.contains(day) },
                             set: { on in if on { club.meetingDays.append(day) } else { club.meetingDays.removeAll { $0 == day } } }
@@ -280,8 +283,8 @@ struct ClubEditView: View {
                     ForEach(club.officers) { o in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(o.name).font(.body)
-                            Text(o.role).font(.caption).foregroundColor(.secondary)
-                            if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundColor(.secondary) }
+                            Text(o.role).font(.caption).foregroundStyle(.secondary)
+                            if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.secondary) }
                         }
                         .padding(.vertical, 2)
                         .swipeActions { Button(role: .destructive) { club.officers.removeAll { $0.id == o.id } } label: { Label("Remove", systemImage: "trash") } }
@@ -289,7 +292,7 @@ struct ClubEditView: View {
                     Button { showOfficerPicker = true } label: { Label("Add Officer from Directory", systemImage: "person.badge.plus") }
                 }
             }
-            .navigationTitle("Edit Club").inlineNavigationBarTitle()
+            .navigationTitle("Edit Club")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -297,9 +300,10 @@ struct ClubEditView: View {
                 }
             }
             .sheet(isPresented: $showOfficerPicker) {
-                ClubDirectoryPickerView(title: "Add Officer", emailOnly: false) { person in
+                Mac_ClubDirectoryPickerView(title: "Add Officer") { person in
                     pendingPerson = person; roleInput = ""
                 }
+                .frame(minWidth: 380, minHeight: 420)
             }
             .alert("What is their role?", isPresented: Binding(get: { pendingPerson != nil }, set: { if !$0 { pendingPerson = nil } })) {
                 TextField("e.g. President, Secretary", text: $roleInput)
@@ -321,11 +325,11 @@ struct ClubEditView: View {
     }
 }
 
-// MARK: - Shared Directory Picker
+// MARK: - Shared Directory Picker (Mac)
 
-struct ClubDirectoryPickerView: View {
+private struct Mac_ClubDirectoryPickerView: View {
     let title: String
-    let emailOnly: Bool
+    var emailOnly: Bool = false
     var onSelect: (DirectoryPerson) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
@@ -337,39 +341,41 @@ struct ClubDirectoryPickerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search by name", text: $searchText)
-                        .textFieldStyle(.plain).autocorrectionDisabled().textInputAutocapitalization(.words)
+                        .textFieldStyle(.plain).autocorrectionDisabled()
                         .onChange(of: searchText) { _, _ in triggerSearch() }
                     if !searchText.isEmpty {
-                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }.buttonStyle(.plain)
+                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
                     }
                 }
-                .padding(10).background(Color(.systemGray6)).clipShape(RoundedRectangle(cornerRadius: 10)).padding()
+                .padding(10)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .padding()
 
                 if isLoading { Spacer(); ProgressView("Searching..."); Spacer() }
-                else if results.isEmpty && !searchText.isEmpty { Spacer(); Text("No results found").foregroundColor(.secondary); Spacer() }
-                else if searchText.isEmpty { Spacer(); Text("Search for a student").foregroundColor(.secondary).padding(); Spacer() }
+                else if results.isEmpty && !searchText.isEmpty { Spacer(); Text("No results found").foregroundStyle(.secondary); Spacer() }
+                else if searchText.isEmpty { Spacer(); Text("Search for a student").foregroundStyle(.secondary).padding(); Spacer() }
                 else {
                     List(results) { person in
                         Button {
                             onSelect(person)
-                            if !emailOnly { dismiss() }
-                            else { dismiss() }
+                            dismiss()
                         } label: {
                             HStack(spacing: 12) {
-                                DirectoryPhoto(urlString: person.photoURL, size: 40)
+                                Mac_DirectoryPhoto(urlString: person.photoURL, size: 40)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(person.displayName).font(.body).foregroundColor(.primary)
-                                    if let email = person.studentEmail { Text(email).font(.caption).foregroundColor(.secondary) }
-                                    if !person.grade.isEmpty { Text(person.grade).font(.caption2).foregroundColor(.secondary) }
+                                    Text(person.displayName).font(.body).foregroundStyle(.primary)
+                                    if let email = person.studentEmail { Text(email).font(.caption).foregroundStyle(.secondary) }
+                                    if !person.grade.isEmpty { Text(person.grade).font(.caption2).foregroundStyle(.secondary) }
                                 }
                             }.padding(.vertical, 2)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .navigationTitle(title).inlineNavigationBarTitle()
+            .navigationTitle(title)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
@@ -394,7 +400,7 @@ struct ClubDirectoryPickerView: View {
 
 // MARK: - Event & Announcement Forms
 
-struct ClubEventFormView: View {
+private struct Mac_ClubEventFormView: View {
     let clubId: String
     let event: ClubEvent?
     var onSave: () async -> Void
@@ -415,7 +421,7 @@ struct ClubEventFormView: View {
                     TextField("Description (optional)", text: $desc, axis: .vertical).lineLimit(3...5)
                 }
             }
-            .navigationTitle(event == nil ? "Add Event" : "Edit Event").inlineNavigationBarTitle()
+            .navigationTitle(event == nil ? "Add Event" : "Edit Event")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -433,7 +439,7 @@ struct ClubEventFormView: View {
     }
 }
 
-struct ClubAnnouncementFormView: View {
+private struct Mac_ClubAnnouncementFormView: View {
     let clubId: String
     let authorName: String
     var onSave: () async -> Void
@@ -450,7 +456,7 @@ struct ClubAnnouncementFormView: View {
                     TextField("Message (optional)", text: $message, axis: .vertical).lineLimit(3...6)
                 }
             }
-            .navigationTitle("Post Announcement").inlineNavigationBarTitle()
+            .navigationTitle("Post Announcement")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -469,7 +475,7 @@ struct ClubAnnouncementFormView: View {
 
 // MARK: - Editor Manager
 
-struct ClubEditorManagerView: View {
+private struct Mac_ClubEditorManagerView: View {
     @Binding var club: Club
     var onUpdate: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -485,7 +491,7 @@ struct ClubEditorManagerView: View {
                             Spacer()
                             if email.lowercased() != superAdminEmail {
                                 Button(role: .destructive) { club.editors.removeAll { $0 == email }; onUpdate() } label: {
-                                    Image(systemName: "minus.circle.fill").foregroundColor(.red)
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                                 }.buttonStyle(.plain)
                             }
                         }
@@ -493,24 +499,14 @@ struct ClubEditorManagerView: View {
                 }
                 Section { Button("Add Editor from Directory") { showPicker = true } }
             }
-            .navigationTitle("Manage Editors").inlineNavigationBarTitle()
+            .navigationTitle("Manage Editors")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showPicker) {
-                ClubDirectoryPickerView(title: "Add Editor", emailOnly: true) { person in
+                Mac_ClubDirectoryPickerView(title: "Add Editor", emailOnly: true) { person in
                     if let email = person.studentEmail, !club.editors.contains(email) { club.editors.append(email); onUpdate() }
                 }
+                .frame(minWidth: 380, minHeight: 420)
             }
         }
     }
-}
-
-// MARK: - URL Helper
-
-private func openClubURL(_ string: String) {
-    guard let url = URL(string: string) else { return }
-    #if os(iOS)
-    UIApplication.shared.open(url)
-    #elseif os(macOS)
-    NSWorkspace.shared.open(url)
-    #endif
 }

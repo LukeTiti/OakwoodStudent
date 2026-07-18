@@ -29,11 +29,23 @@ struct School_NotesApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if os(macOS)
+            Mac_ContentView()
+                .environmentObject(appInfo)
+                .frame(minWidth: 600, idealWidth: 900, minHeight: 550, idealHeight: 700)
+            #else
             ContentView()
                 .environmentObject(appInfo)
-                #if os(macOS)
-                .frame(minWidth: 600, idealWidth: 900, minHeight: 550, idealHeight: 700)
-                #endif
+                .onOpenURL { url in
+                    guard url.scheme == "oakwood" else { return }
+                    if url.host() == "assignment",
+                       let idStr = url.pathComponents.dropFirst().first,
+                       let id = Int(idStr) {
+                        appInfo.pendingAssignmentId = id
+                        appInfo.selectedTab = "Grades"
+                    }
+                }
+            #endif
         }
         #if os(iOS)
         .onChange(of: scenePhase) { _, newPhase in

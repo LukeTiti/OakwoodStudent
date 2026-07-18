@@ -1,10 +1,14 @@
 import AppIntents
 import CoreLocation
 import Foundation
+import MapKit
 
 @AppEntity(schema: .reminders.reminder)
 struct AssignmentEntity: IndexedEntity {
-
+    @DeferredProperty
+    var locationTrigger: LocationTriggerEntity? { get async { nil } }
+    @DeferredProperty
+    var recurrence: Calendar.RecurrenceRule? { get async { nil } }
     static let defaultQuery = AssignmentQuery()
     static let typeDisplayRepresentation: TypeDisplayRepresentation = TypeDisplayRepresentation(
         name: "Assignment",
@@ -12,18 +16,16 @@ struct AssignmentEntity: IndexedEntity {
     )
 
     var id: Int
-    var title: String
-    var isCompleted: Bool
+    @Property(title: "Title") var title: String
+    @Property(title: "Completed") var isCompleted: Bool
     var list: CourseEntity
     var dueDate: DateComponents?
     var note: String?
-    var isFlagged: Bool?
+    @Property(title: "Flagged") var isFlagged: Bool?
     var creationDate: Date?
     var completionDate: Date?
-    var recurrence: Calendar.RecurrenceRule?
     var urls: [URL]
     var tags: Set<String>
-    var locationTrigger: LocationTriggerEntity?
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
@@ -41,13 +43,12 @@ struct AssignmentEntity: IndexedEntity {
             Calendar.current.dateComponents([.year, .month, .day], from: $0)
         }
         self.note = assignment.assignment_notes
-        self.isFlagged = nil
+        self.isFlagged = false
         self.creationDate = nil
         self.completionDate = nil
-        self.recurrence = nil
-        self.urls = []
-        self.tags = []
-        self.locationTrigger = nil
+        self.urls = [URL(string: "oakwood://assignment/\(assignment.score_id)")!]
+        self.tags = Set([assignment.assignment_type].compactMap { $0 })
+        print(self.dueDate)
     }
 }
 
@@ -56,7 +57,9 @@ struct LocationTriggerEntity: AppEntity {
     static let defaultQuery = LocationTriggerQuery()
     var id: String
     var event: LocationTriggerEventType
-    var place: CLPlacemark
+
+    @DeferredProperty
+    var place: CLPlacemark { get async { MKPlacemark(coordinate: .init(latitude: 0, longitude: 0)) } }
 
     var displayRepresentation: DisplayRepresentation { .init(title: "\(id)") }
 
@@ -76,11 +79,25 @@ enum LocationTriggerEventType: String, AppEnum {
 }
 
 extension AssignmentEntity {
-    struct AssignmentQuery: EntityQuery {
+    struct AssignmentQuery: EntityPropertyQuery {
+        typealias ComparatorMappingType = (AssignmentEntity) -> Bool
+
+        static var properties = EntityQueryProperties<AssignmentEntity, (AssignmentEntity) -> Bool> {
+            Property(\AssignmentEntity.$isCompleted) {
+                EqualToComparator { v in { $0.isCompleted == v } }
+            }
+            Property(\AssignmentEntity.$isFlagged) {
+                EqualToComparator { v in { $0.isFlagged == v } }
+            }
+        }
+
+        static var sortingOptions = SortingOptions {
+            SortableBy(\AssignmentEntity.$title)
+        }
 
         func entities(for identifiers: [Int]) async throws -> [AssignmentEntity] {
-            let info = await GradeStore.completionInfo()
-            return await GradeStore.allPairs()
+            let info = GradeStore.completionInfo()
+            return GradeStore.allPairs()
                 .filter { identifiers.contains($0.assignment.score_id) }
                 .map { pair in
                     AssignmentEntity(assignment: pair.assignment, course: pair.course,
@@ -89,9 +106,9 @@ extension AssignmentEntity {
         }
 
         func suggestedEntities() async throws -> [AssignmentEntity] {
-            let info = await GradeStore.completionInfo()
+            let info = GradeStore.completionInfo()
             let now = Date()
-            return await GradeStore.allPairs()
+            return GradeStore.allPairs()
                 .filter {
                     !completionState(for: $0.assignment, info: info) &&
                     ($0.assignment.dueDate ?? .distantPast) >= now
@@ -99,6 +116,17 @@ extension AssignmentEntity {
                 .sorted { ($0.assignment.dueDate ?? .distantFuture) < ($1.assignment.dueDate ?? .distantFuture) }
                 .prefix(20)
                 .map { AssignmentEntity(assignment: $0.assignment, course: $0.course, isCompleted: false) }
+        }
+
+        func entities(matching comparators: [(AssignmentEntity) -> Bool], mode: EntityQueryComparatorMode, sortedBy: [EntityQuerySort<AssignmentEntity>], limit: Int?) async throws -> [AssignmentEntity] {
+            let info = GradeStore.completionInfo()
+            var results = GradeStore.allPairs().map { pair in
+                AssignmentEntity(assignment: pair.assignment, course: pair.course,
+                                 isCompleted: completionState(for: pair.assignment, info: info))
+            }
+            for f in comparators { results = results.filter(f) }
+            if let limit { results = Array(results.prefix(limit)) }
+            return results
         }
     }
 }

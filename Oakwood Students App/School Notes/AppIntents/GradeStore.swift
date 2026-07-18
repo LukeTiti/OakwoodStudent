@@ -2,24 +2,21 @@ import Foundation
 
 enum GradeStore {
 
-    @MainActor
+    private static let defaults = UserDefaults(suiteName: appGroupID)
+
     static func courses() -> [Course] {
-        guard let data = UserDefaults.standard.data(forKey: "cachedCourses"),
+        guard let data = defaults?.data(forKey: "cachedCourses"),
               let decoded = try? JSONDecoder().decode([Course].self, from: data) else { return [] }
         return decoded
     }
 
-    @MainActor
     static func completionInfo() -> [Int: Bool] {
-        guard let data = UserDefaults.standard.data(forKey: "assignmentInfo"),
+        guard let data = defaults?.data(forKey: "assignmentInfo"),
               let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) else { return [:] }
         return decoded
     }
 
-    @MainActor
     static func allPairs() -> [(assignment: Assignment, course: Course)] {
-        courses().flatMap { course in
-            (course.assignments ?? []).map { ($0, course) }
-        }
+        courses().flatMap { course in (course.assignments ?? []).map { ($0, course) } }
     }
 }

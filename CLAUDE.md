@@ -69,3 +69,22 @@ All persistence uses UserDefaults:
 - Views observe `AppInfo` via `@EnvironmentObject`
 - Async/await for all network calls
 - Cookie sync between HTTPCookieStorage and WKWebsiteDataStore required for Veracross session persistence
+
+## Bundled Summer Mode (revert for next school year)
+
+School year ended May 2026. Veracross API is unauthenticated so the app uses locally bundled JSON instead of live fetching. Several places are guarded with `appInfo.isBundledMode` — **remove these guards when real fetching resumes**.
+
+### What `isBundledMode` does
+`AppInfo.isBundledMode` is `true` when `load_data.json` exists in the bundle. Remove that file from the Xcode target to disable bundled mode.
+
+### Guards to remove when reverting
+
+| File | Change | Why it was added |
+|------|--------|-----------------|
+| `Observable Class.swift` | `loadBundledGrades()` call in `init()` | Loads bundled JSON instead of network |
+| `Observable Class.swift` | `bundledInfoMigratedV1` migration block in `loadBundledGrades()` | Cleared artificially seeded `info` values; safe to leave but irrelevant |
+| `Veracross.swift` `CourseView.onAppear` | `guard !appInfo.isBundledMode` | Skips live `loadAssignments` + `initializeCompletionStatus` per course |
+| `ToDoPage.swift` `onAppear` | `!appInfo.isBundledMode &&` on `markPastAssignmentsCompleted` | Skips date-based auto-completion that corrupts `info` dict |
+
+### Completion state logic
+In bundled mode, `info` is the sole source of truth (user toggles only). Initial completion state is derived from `raw_score` / `completion_status` in the JSON via the `completionState()` fallback in `AssignmentEntity.swift` — no seed, no auto-marking. In live mode, `initializeCompletionStatus(forCourseID:)` writes to `info` after each real fetch, which is correct behavior.

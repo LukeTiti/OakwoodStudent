@@ -37,13 +37,13 @@ enum CourseListType: String, AppEnum {
 extension CourseEntity {
     struct CourseQuery: EntityQuery {
         func entities(for identifiers: [String]) async throws -> [CourseEntity] {
-            await GradeStore.courses()
+            GradeStore.courses()
                 .filter { identifiers.contains($0.class_id) }
                 .map(CourseEntity.init)
         }
 
         func suggestedEntities() async throws -> [CourseEntity] {
-            await GradeStore.courses().map(CourseEntity.init)
+            GradeStore.courses().map(CourseEntity.init)
         }
     }
 }
