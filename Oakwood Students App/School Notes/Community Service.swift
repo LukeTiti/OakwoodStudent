@@ -15,7 +15,6 @@ private let signingBaseURL = "https://oakwoodstudents-d9495.web.app/sign"
 struct ServiceView: View {
     @EnvironmentObject var appInfo: AppInfo
     @State private var servicesByYear: [String: [Service]] = [:]
-    @State private var toSubmit: [LocalService] = []
     @State private var forms: [SubmittedForm] = []
     @State private var totalHours: Double = 0
     @State private var showPDF = false
@@ -27,15 +26,29 @@ struct ServiceView: View {
 
     var pdfURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).pdf") } }
     var htmlURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).html") } }
-    var selectedTotalHours: Double { toSubmit.filter { selectedIDs.contains($0.id) }.reduce(0) { $0 + $1.hours } }
+    var selectedTotalHours: Double { appInfo.localServices.filter { selectedIDs.contains($0.id) }.reduce(0) { $0 + $1.hours } }
     var sortedYears: [String] { servicesByYear.keys.sorted().reversed() }
+
+    /// Past outside-service (title, organization, tax ID) combos, most recent first —
+    /// tax IDs are the actual pain point to retype/remember, and this is where they're
+    /// entered (once per form, only for outside service), so suggestions live here.
+    var outsideServiceSuggestions: [OutsideServiceSuggestion] {
+        var seen = Set<String>()
+        var results: [OutsideServiceSuggestion] = []
+        for form in forms.sorted(by: { $0.submittedAt > $1.submittedAt }) where !form.taxID.isEmpty {
+            let suggestion = OutsideServiceSuggestion(title: form.title, organization: form.organization, taxID: form.taxID)
+            guard seen.insert(suggestion.id).inserted else { continue }
+            results.append(suggestion)
+        }
+        return Array(results.prefix(6))
+    }
 
     var body: some View {
         List {
                 // Logged (pending) hours
-                if !toSubmit.isEmpty {
+                if !appInfo.localServices.isEmpty {
                     Section {
-                        ForEach(toSubmit) { service in
+                        ForEach(appInfo.localServices) { service in
                             HStack {
                                 if isSelecting {
                                     Image(systemName: selectedIDs.contains(service.id) ? "checkmark.circle.fill" : "circle")
@@ -118,17 +131,18 @@ struct ServiceView: View {
                 }
             }
             .sheet(isPresented: $showAddSheet) {
-                AddServiceSheet(toSubmit: $toSubmit, onSave: saveLocalData)
+                AddServiceSheet()
             }
             .sheet(isPresented: $showCreateForm) {
                 CreateFormSheet(
-                    selectedServices: toSubmit.filter { selectedIDs.contains($0.id) },
+                    selectedServices: appInfo.localServices.filter { selectedIDs.contains($0.id) },
                     studentId: appInfo.googleVM.userEmail,
-                    studentName: appInfo.googleVM.userName
+                    studentName: appInfo.googleVM.userName,
+                    personPK: appInfo.personPK,
+                    outsideServiceSuggestions: outsideServiceSuggestions
                 ) { newForm in
-                    toSubmit.removeAll { selectedIDs.contains($0.id) }
+                    appInfo.localServices.removeAll { selectedIDs.contains($0.id) }
                     selectedIDs.removeAll(); isSelecting = false
-                    saveLocalData()
                     forms.insert(newForm, at: 0)
                 }
             }
@@ -141,11 +155,16 @@ struct ServiceView: View {
                 }
             }
             .onAppear {
-                loadLocalData()
                 Task { await loadServiceHours() }
                 startListening()
             }
             .onDisappear { listener?.remove() }
+            .onChange(of: appInfo.googleVM.userEmail) { _, _ in
+                // Google sign-in restores asynchronously on cold launch (see loadGoogleLogin()),
+                // so userEmail can still be empty when onAppear's startListening() first runs —
+                // re-attach once it actually becomes available instead of listening forever.
+                startListening()
+            }
     }
 
     private func toggleSelection(_ s: LocalService) {
@@ -153,20 +172,12 @@ struct ServiceView: View {
     }
 
     private func deleteEntry(_ s: LocalService) {
-        toSubmit.removeAll { $0.id == s.id }; saveLocalData()
-    }
-
-    private func saveLocalData() {
-        if let data = try? JSONEncoder().encode(toSubmit) { UserDefaults.standard.set(data, forKey: "serviceToSubmit") }
-    }
-
-    private func loadLocalData() {
-        if let data = UserDefaults.standard.data(forKey: "serviceToSubmit"),
-           let decoded = try? JSONDecoder().decode([LocalService].self, from: data) { toSubmit = decoded }
+        appInfo.localServices.removeAll { $0.id == s.id }
     }
 
     private func startListening() {
         guard !appInfo.googleVM.userEmail.isEmpty else { return }
+        listener?.remove()
         listener = FirebaseService.shared.listenForFormUpdates(studentId: appInfo.googleVM.userEmail) { updated in
             forms = updated
         }
@@ -189,11 +200,34 @@ struct ServiceFormDetailView: View {
                 HStack { Text("Status"); Spacer(); ServiceStatusBadge(status: form.status) }
                 HStack { Text("Total Hours"); Spacer(); Text("\(form.totalHours, specifier: "%.1f")").foregroundColor(.secondary) }
                 HStack { Text("Supervisor"); Spacer(); Text(form.supervisorName).foregroundColor(.secondary) }
+                HStack { Text("Supervisor Email"); Spacer(); Text(form.supervisorEmail).foregroundColor(.secondary) }
                 if !form.supervisorSignature.isEmpty {
-                    HStack { Text("Signed by"); Spacer(); Text(form.supervisorSignature).foregroundColor(.secondary) }
+                    HStack {
+                        Text("Signed by"); Spacer()
+                        Text(form.supervisorSignature).foregroundColor(.secondary)
+                        MatchIndicator(matches: looselyMatches(form.supervisorSignature, form.supervisorName))
+                    }
+                }
+                if !form.signerEmail.isEmpty {
+                    HStack {
+                        Text("Signer Email"); Spacer()
+                        Text(form.signerEmail).foregroundColor(.secondary)
+                        MatchIndicator(matches: looselyMatches(form.signerEmail, form.supervisorEmail))
+                    }
                 }
                 if let signedAt = form.signedAt {
                     HStack { Text("Signed"); Spacer(); Text(signedAt, style: .date).foregroundColor(.secondary) }
+                }
+                if form.signatureImageBase64 != nil {
+                    SignatureImageView(base64: form.signatureImageBase64)
+                        .frame(height: 80)
+                        .frame(maxWidth: .infinity)
+                }
+                if form.status == "rejected" && !form.rejectionReason.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reason").font(.caption).foregroundColor(.secondary)
+                        Text(form.rejectionReason)
+                    }
                 }
             }
 
@@ -210,7 +244,7 @@ struct ServiceFormDetailView: View {
                         isSubmitting = true
                         Task {
                             try? await FirebaseService.shared.submitFormToAdvisor(formId: form.id)
-                            await MainActor.run { form.status = "submitted"; isSubmitting = false }
+                            await MainActor.run { form.status = "pending"; isSubmitting = false }
                         }
                     } label: {
                         if isSubmitting { ProgressView() }
@@ -266,6 +300,8 @@ struct CreateFormSheet: View {
     let selectedServices: [LocalService]
     let studentId: String
     let studentName: String
+    let personPK: Int?
+    var outsideServiceSuggestions: [OutsideServiceSuggestion] = []
     var onSuccess: (SubmittedForm) -> Void
 
     @State private var title = ""
@@ -275,6 +311,7 @@ struct CreateFormSheet: View {
     @State private var reflection2 = ""
     @State private var reflection3 = ""
     @State private var taxID = ""
+    @State private var organization = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showMail = false
@@ -316,10 +353,30 @@ struct CreateFormSheet: View {
                 }
 
                 if hasOutsideService {
+                    if !outsideServiceSuggestions.isEmpty {
+                        Section("Use a Previous Entry") {
+                            ForEach(outsideServiceSuggestions) { suggestion in
+                                Button {
+                                    title = suggestion.title
+                                    organization = suggestion.organization
+                                    taxID = suggestion.taxID
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(suggestion.organization.isEmpty ? suggestion.title : suggestion.organization)
+                                            .foregroundColor(.primary)
+                                        Text("\(suggestion.title) · Tax ID \(suggestion.taxID)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Section {
+                        TextField("Organization Name", text: $organization)
                         TextField("Tax ID Number", text: $taxID)
                     } header: { Text("Organization Tax ID") }
-                    footer: { Text("Required for outside community service hours") }
+                    footer: { Text("Required for outside community service hours. Tap a previous entry above to fill all three, or type your own.") }
                 }
 
                 if let error = errorMessage {
@@ -347,18 +404,21 @@ struct CreateFormSheet: View {
         isSubmitting = true; errorMessage = nil
         let form = ServiceForm(title: title, dateCreated: Date(), services: selectedServices,
                                reflection1: reflection1, reflection2: reflection2, reflection3: reflection3,
-                               taxID: hasOutsideService ? taxID : nil)
+                               taxID: hasOutsideService ? taxID : nil,
+                               organization: hasOutsideService ? organization : nil)
         do {
             let docId = try await FirebaseService.shared.submitServiceForm(
-                form, studentId: studentId, studentName: studentName,
+                form, studentId: studentId, studentName: studentName, personPK: personPK,
                 supervisorName: supervisorName, supervisorEmail: supervisorEmail)
 
             let submittedForm = SubmittedForm(
-                id: docId, title: title, status: "pending_signature", submittedAt: Date(),
+                id: docId, title: title, personPK: personPK, status: "pending_signature", submittedAt: Date(),
                 totalHours: totalHours, reflection1: reflection1, reflection2: reflection2,
                 reflection3: reflection3, taxID: hasOutsideService ? taxID : "",
+                organization: hasOutsideService ? organization : "",
                 services: selectedServices, supervisorName: supervisorName,
-                supervisorEmail: supervisorEmail, supervisorSignature: "", signedAt: nil)
+                supervisorEmail: supervisorEmail, supervisorSignature: "", signerEmail: "", signatureImageBase64: nil,
+                signedAt: nil, rejectionReason: "")
 
             let mailData = makeSigningMailData(to: supervisorEmail, supervisorName: supervisorName,
                 studentName: studentName, title: title, totalHours: totalHours,
@@ -412,8 +472,7 @@ struct MailComposerView: UIViewControllerRepresentable {
 
 struct AddServiceSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @Binding var toSubmit: [LocalService]
-    var onSave: () -> Void
+    @EnvironmentObject var appInfo: AppInfo
     @State private var notes = ""
     @State private var hours = ""
     @State private var date = Date()
@@ -439,9 +498,9 @@ struct AddServiceSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let f = DateFormatter(); f.dateFormat = "MM/dd/yyyy"
-                        toSubmit.append(LocalService(date: f.string(from: date), description: description,
+                        appInfo.localServices.append(LocalService(date: f.string(from: date), description: description,
                                                       notes: notes, hours: Double(hours) ?? 0))
-                        onSave(); dismiss()
+                        dismiss()
                     }
                     .disabled(notes.isEmpty || hours.isEmpty)
                 }

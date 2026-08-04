@@ -13,7 +13,22 @@ struct TeamCalendar {
     let url: String
 }
 
-let schoolEventsCalendarURL = "https://api.veracross.com/oakwood/subscribe/9E7F7993-EB95-4710-B481-AF2130F54B16.ics?uid=E5D94FBE-AA0F-45B4-BD53-B73811D0A8C4"
+struct SchoolCalendarFeed {
+    let category: String
+    let url: String
+}
+
+// Oakwood's public school-level event calendars (Finalsite-hosted) — separate feeds per
+// level so events can be tagged and filtered like sports already are. The old Veracross
+// feed only had generic scheduling milestones (trimester/semester begin markers,
+// bell-schedule day-type labels) and was missing most real events entirely.
+let schoolEventCalendars: [SchoolCalendarFeed] = [
+    SchoolCalendarFeed(category: "High School", url: "https://www.oakwoodway.org/calendar/calendar_2811.ics"),
+    SchoolCalendarFeed(category: "Middle School", url: "https://www.oakwoodway.org/calendar/calendar_2810.ics"),
+    SchoolCalendarFeed(category: "Lower School", url: "https://www.oakwoodway.org/calendar/calendar_2809.ics"),
+    SchoolCalendarFeed(category: "College Counseling", url: "https://www.oakwoodway.org/calendar/calendar_2816.ics"),
+    SchoolCalendarFeed(category: "College Visits", url: "https://www.oakwoodway.org/calendar/calendar_2817.ics"),
+]
 
 let teamCalendars: [TeamCalendar] = [
     // Basketball - Boys

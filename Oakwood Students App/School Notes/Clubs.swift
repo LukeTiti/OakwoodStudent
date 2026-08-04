@@ -3,6 +3,7 @@
 //  School Notes
 //
 import SwiftUI
+import PhotosUI
 
 // MARK: - Clubs List View
 
@@ -37,10 +38,13 @@ struct ClubsView: View {
                         onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
                         onDelete: { clubs.removeAll { $0.id == club.id } }
                     )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(club.name).font(.body.weight(.semibold))
-                            let s = club.meetingScheduleDisplay
-                            if !s.isEmpty { Text(s).font(.caption).foregroundColor(.secondary) }
+                        HStack(spacing: 12) {
+                            ClubSwatchView(club: club)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(club.name).font(.body.weight(.semibold))
+                                let s = club.meetingScheduleDisplay
+                                if !s.isEmpty { Text(s).font(.caption).foregroundColor(.secondary) }
+                            }
                         }.padding(.vertical, 2)
                     }
                 }
@@ -87,6 +91,7 @@ struct ClubDetailView: View {
     @State private var showAddEvent = false
     @State private var showAddAnnouncement = false
     @State private var editingEvent: ClubEvent? = nil
+    @State private var cookiesReady = false
 
     private var userEmail: String { appInfo.googleVM.userEmail }
     private var isSuperAdmin: Bool { userEmail.lowercased() == superAdminEmail }
@@ -95,6 +100,8 @@ struct ClubDetailView: View {
     private var upcomingEvents: [ClubEvent] { events.filter { $0.date >= today } }
     private var pastEvents: [ClubEvent] { events.filter { $0.date < today }.reversed() }
 
+    private var themeGradient: LinearGradient? { ClubTheme.preset(id: club.themeID)?.gradient }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(club.name).font(.largeTitle.bold())
@@ -102,6 +109,11 @@ struct ClubDetailView: View {
                 .padding(.horizontal).padding(.top, 8).padding(.bottom, 4)
 
             List {
+                if club.hasCustomBackground {
+                    ClubCloudImage(clubId: club.id, version: club.backgroundVersion)
+                        .frame(maxWidth: .infinity)
+                        .listRowInsets(EdgeInsets())
+                }
                 // Info
                 if !club.description.isEmpty || !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
                     Section {
@@ -117,7 +129,7 @@ struct ClubDetailView: View {
                     Section("Officers") {
                         ForEach(club.officers) { o in
                             HStack(spacing: 12) {
-                                DirectoryPhoto(urlString: o.photoURL, size: 44)
+                                DirectoryPhoto(urlString: o.photoURL, size: 44, isReady: cookiesReady)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(o.name).font(.body)
                                     Text(o.role).font(.caption).foregroundColor(.secondary)
@@ -176,7 +188,9 @@ struct ClubDetailView: View {
                     }
                 }
             }
+            .scrollContentBackground(themeGradient == nil ? .automatic : .hidden)
         }
+        .background { themeGradient?.ignoresSafeArea() }
         .navigationTitle("")
         .inlineNavigationBarTitle()
         .toolbar {
@@ -199,7 +213,18 @@ struct ClubDetailView: View {
         .sheet(isPresented: $showAddEvent) { ClubEventFormView(clubId: club.id, event: nil) { await loadEvents() } }
         .sheet(item: $editingEvent) { ClubEventFormView(clubId: club.id, event: $0) { await loadEvents() } }
         .sheet(isPresented: $showAddAnnouncement) { ClubAnnouncementFormView(clubId: club.id, authorName: appInfo.googleVM.userName) { await loadAnnouncements() } }
-        .onAppear { Task { await loadEvents(); await loadAnnouncements() } }
+        .onAppear {
+            Task {
+                // Officer photos are Veracross-hosted and need an authenticated session to
+                // load, same as any other Veracross image/document — unlike events/announcements
+                // (Firestore-backed), this view never synced cookies before, so photos silently failed.
+                await appInfo.restorePersistedCookiesIntoStores()
+                await syncCookies()
+                cookiesReady = true
+                await loadEvents()
+                await loadAnnouncements()
+            }
+        }
     }
 
     @ViewBuilder private func deleteEventButton(_ event: ClubEvent) -> some View {
@@ -251,6 +276,10 @@ struct ClubEditView: View {
     @State private var showOfficerPicker = false
     @State private var pendingPerson: DirectoryPerson? = nil
     @State private var roleInput = ""
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var isUploadingImage = false
+    @State private var uploadError: String? = nil
+    @State private var officerEditMode: EditMode = .inactive
 
     var body: some View {
         NavigationStack {
@@ -258,6 +287,34 @@ struct ClubEditView: View {
                 Section("Info") {
                     TextField("Club name", text: $club.name)
                     TextField("Description", text: $club.description, axis: .vertical).lineLimit(3...6)
+                }
+                Section("Appearance") {
+                    Text("Accent Color").font(.caption).foregroundColor(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ThemeSwatchButton(gradient: nil, isSelected: club.themeID == nil) {
+                                club.themeID = nil
+                            }
+                            ForEach(ClubTheme.presets) { theme in
+                                ThemeSwatchButton(gradient: theme.gradient, isSelected: club.themeID == theme.id) {
+                                    club.themeID = theme.id
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label(club.hasCustomBackground ? "Replace Custom Background" : "Upload Custom Background", systemImage: "photo")
+                    }
+                    if isUploadingImage {
+                        HStack { ProgressView(); Text("Uploading…").foregroundColor(.secondary) }
+                    }
+                    if let uploadError {
+                        Text(uploadError).font(.caption).foregroundColor(.red)
+                    }
+                    if club.hasCustomBackground {
+                        Button("Remove Custom Background", role: .destructive) { club.hasCustomBackground = false }
+                    }
                 }
                 Section("Meeting Days") {
                     ForEach(weekDays, id: \.self) { day in
@@ -276,7 +333,7 @@ struct ClubEditView: View {
                     TextField("Time (e.g. 3:30 PM)", text: $club.meetingTime)
                     TextField("Location", text: $club.meetingLocation)
                 }
-                Section("Officers") {
+                Section {
                     ForEach(club.officers) { o in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(o.name).font(.body)
@@ -286,9 +343,17 @@ struct ClubEditView: View {
                         .padding(.vertical, 2)
                         .swipeActions { Button(role: .destructive) { club.officers.removeAll { $0.id == o.id } } label: { Label("Remove", systemImage: "trash") } }
                     }
+                    .onMove { club.officers.move(fromOffsets: $0, toOffset: $1) }
                     Button { showOfficerPicker = true } label: { Label("Add Officer from Directory", systemImage: "person.badge.plus") }
+                } header: {
+                    HStack {
+                        Text("Officers")
+                        Spacer()
+                        if club.officers.count > 1 { EditButton() }
+                    }
                 }
             }
+            .environment(\.editMode, $officerEditMode)
             .navigationTitle("Edit Club").inlineNavigationBarTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -311,6 +376,33 @@ struct ClubEditView: View {
                 }
                 Button("Cancel", role: .cancel) { pendingPerson = nil }
             }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                guard let newItem else { return }
+                Task { await uploadSelectedPhoto(newItem) }
+            }
+        }
+    }
+
+    private func uploadSelectedPhoto(_ item: PhotosPickerItem) async {
+        uploadError = nil
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            await MainActor.run { uploadError = "Couldn't load that photo." }
+            return
+        }
+        await MainActor.run { isUploadingImage = true }
+        let newVersion = club.backgroundVersion + 1
+        do {
+            try await uploadClubBackgroundImage(clubId: club.id, version: newVersion, imageData: data)
+            await MainActor.run {
+                club.hasCustomBackground = true
+                club.backgroundVersion = newVersion
+                isUploadingImage = false
+            }
+        } catch {
+            await MainActor.run {
+                uploadError = "Upload failed: \(error.localizedDescription)"
+                isUploadingImage = false
+            }
         }
     }
 
@@ -320,6 +412,8 @@ struct ClubEditView: View {
         onSave(club); dismiss()
     }
 }
+
+// MARK: - Theme Swatch Button
 
 // MARK: - Shared Directory Picker
 

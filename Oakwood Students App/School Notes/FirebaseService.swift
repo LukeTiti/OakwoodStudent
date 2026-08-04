@@ -17,8 +17,8 @@ class FirebaseService {
     // MARK: - Service Hours Forms
 
     @discardableResult
-    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, supervisorName: String, supervisorEmail: String) async throws -> String {
-        let data: [String: Any] = [
+    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, personPK: Int?, supervisorName: String, supervisorEmail: String) async throws -> String {
+        var data: [String: Any] = [
             "studentId": studentId,
             "studentName": studentName,
             "title": form.title,
@@ -29,6 +29,7 @@ class FirebaseService {
             "reflection2": form.reflection2,
             "reflection3": form.reflection3,
             "taxID": form.taxID ?? "",
+            "organization": form.organization ?? "",
             "supervisorName": supervisorName,
             "supervisorEmail": supervisorEmail,
             "supervisorSignature": "",
@@ -39,12 +40,15 @@ class FirebaseService {
                 "description": $0.description
             ]}
         ]
+        if let personPK { data["personPK"] = personPK }
         let ref = try await db.collection("serviceForms").addDocument(data: data)
         return ref.documentID
     }
 
     func submitFormToAdvisor(formId: String) async throws {
-        try await db.collection("serviceForms").document(formId).updateData(["status": "submitted"])
+        // "pending" matches advisor-portal's status vocabulary (its "Pending" tab filters on
+        // this exact string) — don't rename without updating advisor-portal/index.html too.
+        try await db.collection("serviceForms").document(formId).updateData(["status": "pending"])
     }
 
     func fetchMyServiceForms(studentId: String) async throws -> [SubmittedForm] {
@@ -67,6 +71,7 @@ class FirebaseService {
         return SubmittedForm(
             id: doc.documentID,
             title: data["title"] as? String ?? "Untitled",
+            personPK: data["personPK"] as? Int,
             status: data["status"] as? String ?? "pending_signature",
             submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date(),
             totalHours: data["totalHours"] as? Double ?? 0,
@@ -74,11 +79,15 @@ class FirebaseService {
             reflection2: data["reflection2"] as? String ?? "",
             reflection3: data["reflection3"] as? String ?? "",
             taxID: data["taxID"] as? String ?? "",
+            organization: data["organization"] as? String ?? "",
             services: services,
             supervisorName: data["supervisorName"] as? String ?? "",
             supervisorEmail: data["supervisorEmail"] as? String ?? "",
             supervisorSignature: data["supervisorSignature"] as? String ?? "",
-            signedAt: (data["signedAt"] as? Timestamp)?.dateValue()
+            signerEmail: data["signerEmail"] as? String ?? "",
+            signatureImageBase64: data["signatureImage"] as? String,
+            signedAt: (data["signedAt"] as? Timestamp)?.dateValue(),
+            rejectionReason: data["rejectionReason"] as? String ?? ""
         )
     }
 
@@ -98,18 +107,23 @@ class FirebaseService {
 struct SubmittedForm: Identifiable {
     var id: String
     var title: String
-    var status: String  // "pending_signature" | "signed" | "submitted" | "approved"
+    var personPK: Int?  // Veracross person PK — carried through so a later "post to Veracross" step doesn't need a separate lookup
+    var status: String  // "pending_signature" | "signed" | "pending" | "approved" | "rejected"
     var submittedAt: Date
     var totalHours: Double
     var reflection1: String
     var reflection2: String
     var reflection3: String
     var taxID: String
+    var organization: String
     var services: [LocalService]
     var supervisorName: String
     var supervisorEmail: String
     var supervisorSignature: String
+    var signerEmail: String  // email the signer typed in on the sign page — compare against supervisorEmail
+    var signatureImageBase64: String?
     var signedAt: Date?
+    var rejectionReason: String
 }
 
 // MARK: - App Banner
@@ -462,4 +476,14 @@ struct ServiceForm: Identifiable, Codable {
     var reflection2: String
     var reflection3: String
     var taxID: String?
+    var organization: String?
+}
+
+/// A past (title, organization, tax ID) combo from an outside-service form — tap to
+/// refill all three instead of retyping/remembering the tax ID each time.
+struct OutsideServiceSuggestion: Identifiable {
+    var id: String { "\(title)|\(organization)|\(taxID)" }
+    let title: String
+    let organization: String
+    let taxID: String
 }

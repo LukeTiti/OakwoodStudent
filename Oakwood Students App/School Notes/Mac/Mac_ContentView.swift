@@ -72,7 +72,17 @@ struct Mac_ContentView: View {
     /// session regardless of `isBundledMode`. `loadCourses()` doubles as the auth
     /// probe here since it always hits the live endpoint and reports back whether
     /// the session is valid.
+    ///
+    /// In bundled mode, skip that probe entirely: Veracross is unauthenticated over
+    /// the summer so it always fails, which used to strand the whole sidebar (including
+    /// Grades/To Do, which don't need a session) behind the login screen. Directory and
+    /// Service still hit live Veracross on their own and will show their own empty/error
+    /// state — same as they already do on iOS.
     private func checkLogin() async {
+        if appInfo.isBundledMode {
+            loginState = .loggedIn
+            return
+        }
         await appInfo.restorePersistedCookiesIntoStores()
         await syncCookies()
         let err = await appInfo.loadCourses()

@@ -10,6 +10,7 @@ struct ToDoPage: View {
     @State var errorMessage = ""
     @State private var showAddAssignment = false
     @State private var showAll = false
+    @State private var hidePastDue = false
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
 
@@ -97,12 +98,25 @@ struct ToDoPage: View {
         NavigationStack {
             List {
                 if !pastDueAssignments.isEmpty {
-                    Section(header: Text("Past Due Assignments")) {
-                        ForEach(pastDueAssignments, id: \.assignment.score_id) { item in
-                            NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
-                                ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
+                    Section {
+                        if !hidePastDue {
+                            ForEach(pastDueAssignments, id: \.assignment.score_id) { item in
+                                NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
+                                    ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
+                                }
+                                .unreadRowBackground(item.assignment.is_unread)
                             }
-                            .unreadRowBackground(item.assignment.is_unread)
+                        }
+                    } header: {
+                        HStack {
+                            Text("Past Due Assignments")
+                            Spacer()
+                            Button {
+                                withAnimation { hidePastDue.toggle() }
+                            } label: {
+                                Image(systemName: hidePastDue ? "eye.slash" : "eye")
+                            }
+                            .accessibilityLabel(hidePastDue ? "Show Past Due Assignments" : "Hide Past Due Assignments")
                         }
                     }
                 }
@@ -128,7 +142,7 @@ struct ToDoPage: View {
             .navigationTitle("To Do")
             .macInsetListStyle()
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItemGroup(placement: .cancellationAction) {
                     Button {
                         withAnimation { showAll.toggle() }
                     } label: {

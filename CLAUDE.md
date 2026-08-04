@@ -85,6 +85,7 @@ School year ended May 2026. Veracross API is unauthenticated so the app uses loc
 | `Observable Class.swift` | `bundledInfoMigratedV1` migration block in `loadBundledGrades()` | Cleared artificially seeded `info` values; safe to leave but irrelevant |
 | `Veracross.swift` `CourseView.onAppear` | `guard !appInfo.isBundledMode` | Skips live `loadAssignments` + `initializeCompletionStatus` per course |
 | `ToDoPage.swift` `onAppear` | `!appInfo.isBundledMode &&` on `markPastAssignmentsCompleted` | Skips date-based auto-completion that corrupts `info` dict |
+| `Mac/Mac_ContentView.swift` `checkLogin()` | `if appInfo.isBundledMode { loginState = .loggedIn; return }` | Without this, the live `loadCourses()` auth probe always fails in summer and strands the whole Mac sidebar (Grades/To Do included) behind the login screen |
 
 ### Completion state logic
 In bundled mode, `info` is the sole source of truth (user toggles only). Initial completion state is derived from `raw_score` / `completion_status` in the JSON via the `completionState()` fallback in `AssignmentEntity.swift` — no seed, no auto-marking. In live mode, `initializeCompletionStatus(forCourseID:)` writes to `info` after each real fetch, which is correct behavior.

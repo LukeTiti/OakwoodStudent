@@ -248,10 +248,11 @@ struct DirectoryContactRow: View {
 struct DirectoryPhoto: View {
     let urlString: String?
     let size: CGFloat
+    var isReady: Bool = true
 
     var body: some View {
         Group {
-            if let urlStr = urlString, let url = URL(string: urlStr) {
+            if isReady, let urlStr = urlString, let url = URL(string: urlStr) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() }
                     else { placeholderView }

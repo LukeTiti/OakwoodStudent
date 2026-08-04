@@ -23,10 +23,13 @@
     .sign-section { margin-top: 28px; padding-top: 24px; border-top: 2px solid #f2f2f7; }
     .sign-section h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
     .sign-section p { font-size: 14px; color: #636366; margin-bottom: 16px; line-height: 1.5; }
-    input[type="text"] { width: 100%; border: 1.5px solid #d1d1d6; border-radius: 10px; padding: 12px 14px; font-size: 16px; outline: none; transition: border-color 0.2s; }
-    input[type="text"]:focus { border-color: #007aff; }
+    input[type="text"], input[type="email"] { width: 100%; border: 1.5px solid #d1d1d6; border-radius: 10px; padding: 12px 14px; font-size: 16px; outline: none; transition: border-color 0.2s; }
+    input[type="text"]:focus, input[type="email"]:focus { border-color: #007aff; }
     .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; font-size: 14px; color: #3a3a3c; line-height: 1.5; }
     .checkbox-row input { margin-top: 2px; width: 18px; height: 18px; flex-shrink: 0; accent-color: #007aff; }
+    .sig-label { font-size: 12px; color: #636366; margin: 18px 0 6px; font-weight: 500; }
+    #sigPad { width: 100%; height: 160px; border: 1.5px solid #d1d1d6; border-radius: 10px; touch-action: none; display: block; background: #fff; }
+    .sig-clear { width: auto; background: none; color: #007aff; font-size: 13px; font-weight: 600; padding: 8px 0 0; margin: 4px 0 0; float: right; }
     button { width: 100%; background: #007aff; color: white; border: none; border-radius: 12px; padding: 14px; font-size: 17px; font-weight: 600; cursor: pointer; margin-top: 16px; transition: opacity 0.15s; }
     button:disabled { opacity: 0.4; cursor: default; }
     .status { text-align: center; padding: 40px 20px; }
@@ -47,12 +50,12 @@
     import { getFirestore, doc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
-      apiKey: "AIzaSyC_placeholder_replace_with_real_key",
+      apiKey: "AIzaSyCpw3Mo4A7eoA2heVDhdR1fPFXQkCbcW_E",
       authDomain: "oakwoodstudents-d9495.firebaseapp.com",
       projectId: "oakwoodstudents-d9495",
-      storageBucket: "oakwoodstudents-d9495.appspot.com",
-      messagingSenderId: "placeholder",
-      appId: "placeholder"
+      storageBucket: "oakwoodstudents-d9495.firebasestorage.app",
+      messagingSenderId: "566131280116",
+      appId: "1:566131280116:web:9a6a9f7765a82771deb6a1"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -72,7 +75,7 @@
 
       const d = snap.data();
 
-      if (d.status === "signed" || d.status === "submitted" || d.status === "approved") {
+      if (d.status === "signed" || d.status === "pending" || d.status === "approved" || d.status === "rejected") {
         showAlreadySigned(d);
         return;
       }
@@ -113,34 +116,102 @@
 
         <div class="sign-section">
           <h2>Electronic Signature</h2>
-          <p>By typing your full name and checking the box below, you certify that the service hours listed above are accurate to the best of your knowledge.</p>
-          <input type="text" id="sigName" placeholder="Your full name" oninput="updateBtn()" />
+          <p>By printing your name, drawing your signature, and checking the box below, you certify that the service hours listed above are accurate to the best of your knowledge.</p>
+          <input type="text" id="sigName" placeholder="Print your full name" oninput="updateBtn()" />
+          <input type="email" id="sigEmail" placeholder="Your email address" oninput="updateBtn()" style="margin-top:10px" />
+          <div class="sig-label">Draw your signature below</div>
+          <canvas id="sigPad"></canvas>
+          <button type="button" class="sig-clear" onclick="clearSignature()">Clear</button>
           <div class="checkbox-row">
             <input type="checkbox" id="certify" onchange="updateBtn()" />
             <label for="certify">I certify that the information above is accurate and I approve these service hours for ${esc(d.studentName)}.</label>
           </div>
-          <button id="signBtn" disabled onclick="sign('${docId}', '${esc(d.supervisorName)}')">Sign Form</button>
+          <button id="signBtn" disabled onclick="sign('${docId}')">Sign Form</button>
           <div class="error" id="errMsg"></div>
         </div>`;
+
+      setupSignaturePad();
     }
+
+    // ─── Signature pad (pointer events cover mouse, touch, and pen) ──────────
+    let sigCtx = null, drawing = false, lastPoint = null, hasSignatureInk = false;
+
+    function setupSignaturePad() {
+      const canvas = document.getElementById("sigPad");
+      if (!canvas) return;
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      sigCtx = canvas.getContext("2d");
+      sigCtx.scale(ratio, ratio);
+      sigCtx.lineWidth = 2;
+      sigCtx.lineCap = "round";
+      sigCtx.lineJoin = "round";
+      sigCtx.strokeStyle = "#1c1c1e";
+      hasSignatureInk = false;
+      drawing = false;
+
+      const getPos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      };
+
+      canvas.addEventListener("pointerdown", (e) => {
+        drawing = true;
+        hasSignatureInk = true;
+        lastPoint = getPos(e);
+        canvas.setPointerCapture(e.pointerId);
+        updateBtn();
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drawing) return;
+        const p = getPos(e);
+        sigCtx.beginPath();
+        sigCtx.moveTo(lastPoint.x, lastPoint.y);
+        sigCtx.lineTo(p.x, p.y);
+        sigCtx.stroke();
+        lastPoint = p;
+      });
+      const stopDrawing = () => { drawing = false; };
+      canvas.addEventListener("pointerup", stopDrawing);
+      canvas.addEventListener("pointerleave", stopDrawing);
+    }
+
+    window.clearSignature = function() {
+      const canvas = document.getElementById("sigPad");
+      if (canvas && sigCtx) {
+        const ratio = window.devicePixelRatio || 1;
+        sigCtx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
+      }
+      hasSignatureInk = false;
+      updateBtn();
+    };
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     window.updateBtn = function() {
       const name = document.getElementById("sigName")?.value.trim();
+      const email = document.getElementById("sigEmail")?.value.trim();
       const checked = document.getElementById("certify")?.checked;
       const btn = document.getElementById("signBtn");
-      if (btn) btn.disabled = !(name && checked);
+      if (btn) btn.disabled = !(name && email && emailPattern.test(email) && checked && hasSignatureInk);
     };
 
-    window.sign = async function(docId, supervisorName) {
+    window.sign = async function(docId) {
       const btn = document.getElementById("signBtn");
       const name = document.getElementById("sigName").value.trim();
+      const email = document.getElementById("sigEmail").value.trim();
+      const canvas = document.getElementById("sigPad");
       btn.disabled = true; btn.textContent = "Signing…";
       try {
         const ref = doc(db, "serviceForms", docId);
         await updateDoc(ref, {
           supervisorSignature: name,
+          signerEmail: email,
+          signatureImage: canvas.toDataURL("image/png"),
           signedAt: serverTimestamp(),
-          status: "signed"
+          status: "pending"
         });
         showSuccess(name);
       } catch(e) {
@@ -154,7 +225,7 @@
         <div class="status">
           <div class="status-icon">✅</div>
           <h2>Form Signed</h2>
-          <p>Thank you, ${esc(name)}. The student will be notified and can now submit their form to their advisor.</p>
+          <p>Thank you, ${esc(name)}. This form has been sent to the student's advisor for approval.</p>
         </div>`;
     }
 

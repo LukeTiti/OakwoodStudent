@@ -19,15 +19,18 @@ struct Mac_CalendarView: View {
 
     /// Always shows at least `minDaysAhead` days out, but extends further to cover
     /// whatever the furthest-out loaded event is — no hard cutoff on how far ahead
-    /// the calendar can scroll.
-    private var dayOffsets: Range<Int> {
+    /// the calendar can scroll. Empty days are dropped entirely except today, which
+    /// always stays visible as an anchor even with nothing on it.
+    private var dayOffsets: [Int] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let maxEventOffset = nonPersonalItems
             .compactMap { calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: $0.date)).day }
             .max() ?? 0
         let daysAhead = max(minDaysAhead, maxEventOffset + 1)
-        return -daysBack..<daysAhead
+        return (-daysBack..<daysAhead).filter { offset in
+            offset == 0 || !items(for: offset).isEmpty
+        }
     }
 
     private var allCategories: [String] {

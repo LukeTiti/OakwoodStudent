@@ -5,6 +5,7 @@ import SwiftSoup
 import Combine
 import Charts
 import FirebaseFirestore
+import CloudKit
 import PDFKit
 
 // MARK: - API Response Types
@@ -177,6 +178,7 @@ struct SchoolEvent: Identifiable, Hashable {
     let endTime: String
     let location: String
     let description: String
+    var category: String = "School Events"  // which school-level feed this came from — see schoolEventCalendars
 
     var timeText: String {
         endTime.isEmpty ? startTime : "\(startTime) - \(endTime)"
@@ -211,7 +213,7 @@ enum CalendarItem: Identifiable, Hashable {
     var category: String {
         switch self {
         case .sports(let e): return e.sportName
-        case .school: return "School Events"
+        case .school(let e): return e.category
         case .personal: return "My Schedule"
         case .practice: return "Practices"
         }
@@ -240,6 +242,26 @@ struct ServiceFormRow: View {
     }
 }
 
+// MARK: - Supervisor verification helpers
+
+/// Loose, case/whitespace-insensitive comparison for flagging a mismatch between
+/// what the student claimed (supervisor name/email) and what the signer actually
+/// entered on the sign page — a cheap signal for the advisor, not proof of anything.
+func looselyMatches(_ a: String, _ b: String) -> Bool {
+    let na = a.trimmingCharacters(in: .whitespaces).lowercased()
+    let nb = b.trimmingCharacters(in: .whitespaces).lowercased()
+    return !na.isEmpty && na == nb
+}
+
+struct MatchIndicator: View {
+    let matches: Bool
+    var body: some View {
+        Image(systemName: matches ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            .foregroundColor(matches ? .green : .orange)
+            .font(.caption)
+    }
+}
+
 // MARK: - ServiceStatusBadge
 
 struct ServiceStatusBadge: View {
@@ -248,16 +270,18 @@ struct ServiceStatusBadge: View {
         switch status {
         case "pending_signature": return "Awaiting Signature"
         case "signed": return "Signed"
-        case "submitted": return "Submitted"
+        case "pending": return "Pending Approval"
         case "approved": return "Approved"
+        case "rejected": return "Rejected"
         default: return status.capitalized
         }
     }
     private var color: Color {
         switch status {
         case "signed": return .blue
-        case "submitted": return .orange
+        case "pending": return .orange
         case "approved": return .green
+        case "rejected": return .red
         default: return .secondary
         }
     }
@@ -268,6 +292,32 @@ struct ServiceStatusBadge: View {
             .background(color.opacity(0.15))
             .foregroundColor(color)
             .clipShape(Capsule())
+    }
+}
+
+// MARK: - Signature Image
+
+/// Renders a supervisor's drawn signature, stored as a base64 PNG (optionally
+/// a full `data:image/png;base64,...` URI) inside the Firestore form document.
+struct SignatureImageView: View {
+    let base64: String?
+
+    var body: some View {
+        if let image {
+            image.resizable().scaledToFit()
+        }
+    }
+
+    private var image: Image? {
+        guard let base64 else { return nil }
+        let payload: String
+        if let commaIndex = base64.firstIndex(of: ",") {
+            payload = String(base64[base64.index(after: commaIndex)...])
+        } else {
+            payload = base64
+        }
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        return decodedImage(from: data)
     }
 }
 
@@ -713,6 +763,9 @@ struct Club: Identifiable {
     var meetingLocation: String
     var editors: [String]
     var officers: [ClubOfficer]
+    var themeID: String? = nil       // preset theme id (see ClubTheme.presets) — mutually exclusive with a custom image
+    var hasCustomBackground: Bool = false  // if true, an image is stored in CloudKit under a "ClubBackground" record keyed by this club's id
+    var backgroundVersion: Int = 0   // bumped on every re-upload so cached copies elsewhere know to refetch
 
     var meetingScheduleDisplay: String {
         var parts: [String] = []
@@ -775,7 +828,7 @@ extension FirebaseService {
     }
 
     func updateClub(_ club: Club) async throws {
-        try await clubRef(club.id).setData([
+        let data: [String: Any] = [
             "name": club.name, "description": club.description,
             "meetingDays": club.meetingDays, "meetingFrequency": club.meetingFrequency,
             "meetingTime": club.meetingTime, "meetingLocation": club.meetingLocation,
@@ -784,8 +837,12 @@ extension FirebaseService {
                 var d: [String: Any] = ["id": o.id, "name": o.name, "role": o.role, "email": o.email]
                 if let p = o.photoURL { d["photoURL"] = p }
                 return d
-            }
-        ], merge: true)
+            },
+            "themeID": club.themeID ?? FieldValue.delete(),
+            "hasCustomBackground": club.hasCustomBackground,
+            "backgroundVersion": club.backgroundVersion
+        ]
+        try await clubRef(club.id).setData(data, merge: true)
     }
 
     func deleteClub(clubId: String) async throws {
@@ -845,8 +902,172 @@ extension FirebaseService {
         return Club(id: doc.documentID, name: name, description: d["description"] as? String ?? "",
                     meetingDays: meetingDays, meetingFrequency: d["meetingFrequency"] as? String ?? "Weekly",
                     meetingTime: d["meetingTime"] as? String ?? "", meetingLocation: d["meetingLocation"] as? String ?? "",
-                    editors: d["editors"] as? [String] ?? [], officers: officers)
+                    editors: d["editors"] as? [String] ?? [], officers: officers,
+                    themeID: d["themeID"] as? String, hasCustomBackground: d["hasCustomBackground"] as? Bool ?? false,
+                    backgroundVersion: d["backgroundVersion"] as? Int ?? 0)
     }
+}
+
+// MARK: - Club Theme
+
+struct ClubTheme: Identifiable {
+    let id: String
+    let name: String
+    let colors: [Color]
+
+    var gradient: LinearGradient {
+        LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    static let presets: [ClubTheme] = [
+        ClubTheme(id: "sunset", name: "Sunset", colors: [Color(red: 1.00, green: 0.49, blue: 0.37), Color(red: 0.99, green: 0.71, blue: 0.48)]),
+        ClubTheme(id: "ocean", name: "Ocean", colors: [Color(red: 0.02, green: 0.51, blue: 0.71), Color(red: 0.29, green: 0.79, blue: 0.85)]),
+        ClubTheme(id: "forest", name: "Forest", colors: [Color(red: 0.13, green: 0.45, blue: 0.27), Color(red: 0.42, green: 0.68, blue: 0.35)]),
+        ClubTheme(id: "grape", name: "Grape", colors: [Color(red: 0.42, green: 0.13, blue: 0.55), Color(red: 0.65, green: 0.34, blue: 0.83)]),
+        ClubTheme(id: "midnight", name: "Midnight", colors: [Color(red: 0.10, green: 0.12, blue: 0.24), Color(red: 0.25, green: 0.29, blue: 0.48)]),
+        ClubTheme(id: "coral", name: "Coral", colors: [Color(red: 0.98, green: 0.42, blue: 0.42), Color(red: 0.99, green: 0.62, blue: 0.62)]),
+        ClubTheme(id: "gold", name: "Gold", colors: [Color(red: 0.85, green: 0.65, blue: 0.13), Color(red: 0.96, green: 0.82, blue: 0.40)]),
+        ClubTheme(id: "slate", name: "Slate", colors: [Color(red: 0.30, green: 0.34, blue: 0.39), Color(red: 0.55, green: 0.60, blue: 0.65)]),
+        ClubTheme(id: "rose", name: "Rose", colors: [Color(red: 0.85, green: 0.20, blue: 0.45), Color(red: 0.98, green: 0.55, blue: 0.70)]),
+        ClubTheme(id: "teal", name: "Teal", colors: [Color(red: 0.00, green: 0.50, blue: 0.50), Color(red: 0.35, green: 0.78, blue: 0.75)]),
+        ClubTheme(id: "indigo", name: "Indigo", colors: [Color(red: 0.29, green: 0.24, blue: 0.63), Color(red: 0.55, green: 0.48, blue: 0.85)]),
+        ClubTheme(id: "crimson", name: "Crimson", colors: [Color(red: 0.70, green: 0.11, blue: 0.15), Color(red: 0.90, green: 0.30, blue: 0.30)]),
+        ClubTheme(id: "mint", name: "Mint", colors: [Color(red: 0.15, green: 0.65, blue: 0.50), Color(red: 0.55, green: 0.90, blue: 0.75)]),
+        ClubTheme(id: "amber", name: "Amber", colors: [Color(red: 0.90, green: 0.45, blue: 0.05), Color(red: 0.99, green: 0.65, blue: 0.30)]),
+        ClubTheme(id: "steel", name: "Steel", colors: [Color(red: 0.20, green: 0.35, blue: 0.50), Color(red: 0.45, green: 0.60, blue: 0.75)]),
+        ClubTheme(id: "plum", name: "Plum", colors: [Color(red: 0.35, green: 0.15, blue: 0.30), Color(red: 0.60, green: 0.35, blue: 0.55)]),
+    ]
+
+    static func preset(id: String?) -> ClubTheme? {
+        guard let id else { return nil }
+        return presets.first { $0.id == id }
+    }
+}
+
+struct ThemeSwatchButton: View {
+    let gradient: LinearGradient?
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if let gradient {
+                    Circle().fill(gradient)
+                } else {
+                    Circle().strokeBorder(Color.secondary, lineWidth: 1.5)
+                }
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(gradient == nil ? .secondary : .white)
+                }
+            }
+            .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Fetches + displays a club's custom background image, stored as a CKAsset in
+/// CloudKit's public database (record type "ClubBackground", keyed by club id).
+/// Blank while loading or if the club has no custom image — callers that need a
+/// fallback (theme color, neutral gray) decide that themselves.
+struct ClubCloudImage: View {
+    let clubId: String
+    var version: Int = 0  // bump Club.backgroundVersion on re-upload so .task(id:) refetches instead of showing a stale cached copy
+    var contentMode: ContentMode = .fit  // .fit shows the whole uploaded picture (banners); .fill crops to fill a fixed shape (swatches)
+
+    @State private var imageData: Data?
+
+    var body: some View {
+        Group {
+            if let imageData, let image = decodedImage(from: imageData) {
+                image.resizable().aspectRatio(contentMode: contentMode)
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: version) { await load() }
+    }
+
+    private func load() async {
+        let key = "clubBackground-\(clubId)-\(version)"
+        if let cached = ImageDataCache.shared.data(for: key) { imageData = cached; return }
+        guard let record = try? await CKContainer.default().publicCloudDatabase.record(for: CKRecord.ID(recordName: clubId)),
+              let asset = record["image"] as? CKAsset, let fileURL = asset.fileURL,
+              let data = try? Data(contentsOf: fileURL) else { return }
+        ImageDataCache.shared.store(data, for: key)
+        imageData = data
+    }
+}
+
+/// Small rounded swatch for club list rows — image if the club has one, else theme
+/// gradient, else neutral gray.
+struct ClubSwatchView: View {
+    let club: Club
+    var size: CGFloat = 40
+
+    var body: some View {
+        Group {
+            if club.hasCustomBackground {
+                ClubCloudImage(clubId: club.id, version: club.backgroundVersion, contentMode: .fill)
+            } else if let theme = ClubTheme.preset(id: club.themeID) {
+                theme.gradient
+            } else {
+                Color.gray.opacity(0.12)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size / 5))
+    }
+}
+
+/// Downscales + JPEG-compresses an image before upload — caps club background images
+/// around a couple hundred KB instead of shipping multi-MB camera photos, since this
+/// gets fetched repeatedly by anyone viewing the club page.
+func compressedImageData(from data: Data, maxDimension: CGFloat = 1200, quality: CGFloat = 0.7) -> Data? {
+    #if os(iOS)
+    guard let image = UIImage(data: data) else { return nil }
+    let size = image.size
+    let scale = min(1, maxDimension / max(size.width, size.height))
+    let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+    let renderer = UIGraphicsImageRenderer(size: newSize)
+    let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+    return resized.jpegData(compressionQuality: quality)
+    #else
+    guard let image = NSImage(data: data) else { return nil }
+    let size = image.size
+    let scale = min(1, maxDimension / max(size.width, size.height))
+    let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+    let resized = NSImage(size: newSize)
+    resized.lockFocus()
+    image.draw(in: NSRect(origin: .zero, size: newSize), from: NSRect(origin: .zero, size: size), operation: .copy, fraction: 1)
+    resized.unlockFocus()
+    guard let tiff = resized.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+    return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+    #endif
+}
+
+/// Uploads (or replaces) a club's background image as a CKAsset in CloudKit's public
+/// database, keyed by the club's own id — no separate URL to store or manage, any
+/// device can fetch it later just by knowing the club id. Saving to an existing
+/// record name overwrites it, so "replace" is just "upload again."
+func uploadClubBackgroundImage(clubId: String, version: Int, imageData: Data) async throws {
+    guard let compressed = compressedImageData(from: imageData) else {
+        throw NSError(domain: "Club", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn't process that image."])
+    }
+    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
+    try compressed.write(to: tempURL)
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+
+    let record = CKRecord(recordType: "ClubBackground", recordID: CKRecord.ID(recordName: clubId))
+    record["image"] = CKAsset(fileURL: tempURL)
+    // .changedKeys instead of the default .ifServerRecordUnchanged — this is a freshly
+    // constructed local record with no change tag, so the default policy treats any
+    // re-upload (replacing an existing background) as a conflict and rejects it.
+    _ = try await CKContainer.default().publicCloudDatabase.modifyRecords(saving: [record], deleting: [], savePolicy: .changedKeys)
+    ImageDataCache.shared.store(compressed, for: "clubBackground-\(clubId)-\(version)")
 }
 
 // MARK: - Directory Models
@@ -1329,6 +1550,16 @@ func preloadScoopImages() async {
     }
 }
 
+func decodedImage(from data: Data) -> Image? {
+    #if os(iOS)
+    guard let ui = UIImage(data: data) else { return nil }
+    return Image(uiImage: ui)
+    #else
+    guard let ns = NSImage(data: data) else { return nil }
+    return Image(nsImage: ns)
+    #endif
+}
+
 private class ImageDataCache {
     static let shared = ImageDataCache()
     private let cache = NSCache<NSString, NSData>()
@@ -1354,23 +1585,13 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
 
     var body: some View {
         Group {
-            if let data = imageData, let image = makeImage(from: data) {
+            if let data = imageData, let image = decodedImage(from: data) {
                 content(image)
             } else {
                 placeholder()
                     .task { await load() }
             }
         }
-    }
-
-    private func makeImage(from data: Data) -> Image? {
-        #if os(iOS)
-        guard let ui = UIImage(data: data) else { return nil }
-        return Image(uiImage: ui)
-        #else
-        guard let ns = NSImage(data: data) else { return nil }
-        return Image(nsImage: ns)
-        #endif
     }
 
     private func load() async {

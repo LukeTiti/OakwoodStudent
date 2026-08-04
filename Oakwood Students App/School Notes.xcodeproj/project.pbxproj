@@ -21,6 +21,7 @@
 		0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */ = {isa = PBXBuildFile; productRef = 0668365C2E6BDE4800C7F530 /* iCalendarParser */; };
 		06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690AF2E723BFE0050E087 /* GoogleSignIn */; };
 		06A690B22E723BFE0050E087 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690B12E723BFE0050E087 /* GoogleSignInSwift */; };
+		06BB80B63022339600AFC011 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 06BB80B53022339600AFC011 /* FirebaseStorage */; };
 		06CCEF762FE282FB00B12D89 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06CCEF752FE282FB00B12D89 /* AppIntents.framework */; };
 		06CCEF782FE2832500B12D89 /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06CCEF772FE2832500B12D89 /* CoreSpotlight.framework */; };
 /* End PBXBuildFile section */
@@ -171,6 +172,7 @@
 				0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */,
 				06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */,
 				06A690B22E723BFE0050E087 /* GoogleSignInSwift in Frameworks */,
+				06BB80B63022339600AFC011 /* FirebaseStorage in Frameworks */,
 				064307CC2F731C12004558A6 /* FirebaseMessaging in Frameworks */,
 				0651E82D2F2DCF1400098F78 /* FirebaseAnalyticsCore in Frameworks */,
 			);
@@ -283,6 +285,7 @@
 				0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */,
 				0651E8342F2E4BEE00098F78 /* FirebaseFirestore */,
 				064307CB2F731C12004558A6 /* FirebaseMessaging */,
+				06BB80B53022339600AFC011 /* FirebaseStorage */,
 			);
 			productName = "School Notes";
 			productReference = 0668360C2E692ADB00C7F530 /* OW Students.app */;
@@ -660,7 +663,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "School Notes/School Notes.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3XPWY9TZUS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -694,7 +697,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
 				PRODUCT_NAME = "OW Students";
 				REGISTER_APP_GROUPS = YES;
@@ -719,7 +722,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "School Notes/School Notes.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3XPWY9TZUS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -753,7 +756,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.luketiti.School-Notes";
 				PRODUCT_NAME = "OW Students";
 				REGISTER_APP_GROUPS = YES;
@@ -1013,6 +1016,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 06A690AE2E723BFE0050E087 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
+		};
+		06BB80B53022339600AFC011 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -42,11 +42,13 @@ class AppInfo: ObservableObject {
             if let url = personalCalendarURL {
                 UserDefaults.standard.set(url, forKey: "personalCalendarURL")
             }
+            calendarCloudSync.push(CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
         }
     }
     @Published var practiceCalendarURLs: [String] = [] {
         didSet {
             UserDefaults.standard.set(practiceCalendarURLs, forKey: "practiceCalendarURLs")
+            calendarCloudSync.push(CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
         }
     }
 
@@ -64,10 +66,41 @@ class AppInfo: ObservableObject {
     }
     private var nextCustomId: Int = -1
     @Published var info: [Int: Bool] = [:] {
-        didSet {    
+        didSet {
             saveAssignmentInfo()
         }
     }
+
+    // MARK: - Community Service
+    // `deletedServiceIDs` is a tombstone set: once an id is deleted it's remembered
+    // forever (small personal list, not worth expiring), so a device that hasn't
+    // seen the delete yet can't resurrect it by re-unioning its stale local copy.
+    private var deletedServiceIDs: Set<UUID> = []
+    @Published var localServices: [LocalService] = [] {
+        didSet {
+            let removed = Set(oldValue.map(\.id)).subtracting(localServices.map(\.id))
+            if !removed.isEmpty { deletedServiceIDs.formUnion(removed) }
+            if let data = try? JSONEncoder().encode(localServices) {
+                UserDefaults.standard.set(data, forKey: "serviceToSubmit")   // same key as before — preserves existing users' data
+            }
+            if let data = try? JSONEncoder().encode(deletedServiceIDs) {
+                UserDefaults.standard.set(data, forKey: "deletedServiceIDs")
+            }
+            serviceCloudSync.push(SyncedList(items: localServices, deletedIDs: deletedServiceIDs))
+        }
+    }
+
+    // MARK: - iCloud Sync
+    private let assignmentCloudSync = CloudSync<[Int: Bool]>(key: "assignmentInfo") { local, remote in
+        local.merging(remote) { $0 || $1 }   // once complete on any device, stays complete everywhere
+    }
+    private let calendarCloudSync = CloudSync<CalendarSubscriptions>(key: "calendarSubscriptions") { local, remote in
+        CalendarSubscriptions(
+            personalCalendarURL: local.personalCalendarURL ?? remote.personalCalendarURL,
+            practiceCalendarURLs: Array(Set(local.practiceCalendarURLs + remote.practiceCalendarURLs))
+        )
+    }
+    private let serviceCloudSync = CloudSync<SyncedList<LocalService>>(key: "localServices", merge: SyncedList.merge)
 
     // MARK: Cookie persistence
     // Store cookies as property dictionaries (HTTPCookie.propertyKeys) and a timestamp
@@ -89,6 +122,41 @@ class AppInfo: ObservableObject {
         loadGoogleLogin()
         personalCalendarURL = UserDefaults.standard.string(forKey: "personalCalendarURL")
         practiceCalendarURLs = UserDefaults.standard.stringArray(forKey: "practiceCalendarURLs") ?? []
+        if let data = UserDefaults.standard.data(forKey: "deletedServiceIDs"),
+           let decoded = try? JSONDecoder().decode(Set<UUID>.self, from: data) {
+            deletedServiceIDs = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: "serviceToSubmit"),
+           let decoded = try? JSONDecoder().decode([LocalService].self, from: data) {
+            localServices = decoded
+        }
+
+        // Reconcile local data with iCloud now that everything's loaded locally
+        info = assignmentCloudSync.reconcile(local: info)
+        let mergedCalendar = calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
+        personalCalendarURL = mergedCalendar.personalCalendarURL
+        practiceCalendarURLs = mergedCalendar.practiceCalendarURLs
+        let mergedServices = serviceCloudSync.reconcile(local: SyncedList(items: localServices, deletedIDs: deletedServiceIDs))
+        deletedServiceIDs = mergedServices.deletedIDs   // set before localServices so its didSet pushes the complete tombstone set
+        localServices = mergedServices.items
+
+        // Re-reconcile whenever iCloud reports a change that originated elsewhere.
+        // Local .set() calls never trigger this notification, so there's no feedback loop with push().
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: NSUbiquitousKeyValueStore.default,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.info = self.assignmentCloudSync.reconcile(local: self.info)
+            let merged = self.calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: self.personalCalendarURL, practiceCalendarURLs: self.practiceCalendarURLs))
+            self.personalCalendarURL = merged.personalCalendarURL
+            self.practiceCalendarURLs = merged.practiceCalendarURLs
+            let mergedServices = self.serviceCloudSync.reconcile(local: SyncedList(items: self.localServices, deletedIDs: self.deletedServiceIDs))
+            self.deletedServiceIDs = mergedServices.deletedIDs
+            self.localServices = mergedServices.items
+        }
+        NSUbiquitousKeyValueStore.default.synchronize()
 
         // If already signed in from a previous session, save FCM token now
         #if os(iOS)
@@ -163,6 +231,7 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(info) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfo")
         }
+        assignmentCloudSync.push(info)
     }
 
     private func loadAssignmentInfo() {
@@ -808,11 +877,19 @@ class AppInfo: ObservableObject {
     }
 
     func loadCalendarSchoolEvents() async -> [SchoolEvent] {
-        guard !schoolEventsCalendarURL.isEmpty,
-              let url = URL(string: schoolEventsCalendarURL),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let ics = String(data: data, encoding: .utf8) else { return [] }
-        return parseCalendarSchoolEvents(ics)
+        await withTaskGroup(of: [SchoolEvent].self) { group in
+            for feed in schoolEventCalendars {
+                group.addTask {
+                    guard let url = URL(string: feed.url),
+                          let (data, _) = try? await URLSession.shared.data(from: url),
+                          let ics = String(data: data, encoding: .utf8) else { return [] }
+                    return self.parseCalendarSchoolEvents(ics, category: feed.category)
+                }
+            }
+            var all: [SchoolEvent] = []
+            for await batch in group { all += batch }
+            return all
+        }
     }
 
     func fetchCalendarSportsEvents(from calendar: TeamCalendar) async -> [SportsEvent] {
@@ -848,11 +925,11 @@ class AppInfo: ObservableObject {
         )
     }
 
-    func parseCalendarSchoolEvents(_ ics: String) -> [SchoolEvent] {
-        return parseICalRecords(ics).compactMap { createSchoolEvent(from: $0) }
+    func parseCalendarSchoolEvents(_ ics: String, category: String) -> [SchoolEvent] {
+        return parseICalRecords(ics).compactMap { createSchoolEvent(from: $0, category: category) }
     }
 
-    func createSchoolEvent(from data: [String: String]) -> SchoolEvent? {
+    func createSchoolEvent(from data: [String: String], category: String) -> SchoolEvent? {
         guard let uid = data["UID"], let summary = data["SUMMARY"], let dtstart = data["DTSTART"] else { return nil }
         if summary.range(of: "^(HS|LS|MS)\\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$", options: .regularExpression) != nil { return nil }
         if summary.range(of: "\\bvs\\b", options: [.regularExpression, .caseInsensitive]) != nil { return nil }
@@ -868,7 +945,7 @@ class AppInfo: ObservableObject {
             id: uid, title: displayTitle, date: date,
             startTime: timeFormatter.string(from: date),
             endTime: endDate.map { timeFormatter.string(from: $0) } ?? "",
-            location: location, description: description
+            location: location, description: description, category: category
         )
     }
 
