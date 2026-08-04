@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Oakwood Advisor – Veracross Bridge",
-  "version": "0.1.0",
-  "description": "v0.1: read-only test. Pulls a student's volunteer hours from Veracross using the advisor's existing logged-in session — no separate login, no stored credentials.",
+  "version": "0.9.0",
+  "description": "v0.9: read + test update + test create + value-list lookup, hardcoded to one student PK. Injects requests directly into the Veracross tab on click so they run in the page's real origin.",
   "action": {
     "default_popup": "popup.html"
   },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
   "host_permissions": [
     "https://axiom.veracross.com/*"
   ]
