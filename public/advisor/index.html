@@ -129,9 +129,8 @@
         .slot-label.open  { font-weight: 400; color: #bbb; }
         .slot-name  { color: #222; }
 
-        .sport-filter { display: flex; gap: 8px; margin-bottom: 14px; }
-        .filter-btn { padding: 6px 14px; border: 1.5px solid #ddd; background: white; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; color: #555; }
-        .filter-btn.active { border-color: #2d6a2d; background: #eaf3ea; color: #2d6a2d; }
+        .sport-select { padding: 9px 11px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-weight: 500; color: #333; background: white; outline: none; margin-bottom: 14px; width: 100%; max-width: 260px; }
+        .sport-select:focus { border-color: #2d6a2d; }
 
         /* ── Banners ─────────────────────────────────────────── */
         .banner-form { margin-bottom: 20px; }
@@ -181,9 +180,9 @@
 
     <!-- SPORTS SIGNUPS -->
     <div id="section-sports" class="section">
-        <div class="sport-filter" id="sport-filter">
-            <button class="filter-btn active" onclick="setSportFilter('all', this)">All</button>
-        </div>
+        <select id="sport-filter" class="sport-select" onchange="setSportFilter(this.value)">
+            <option value="all">All Sports</option>
+        </select>
         <div id="sports-container"><div class="loading">Loading games…</div></div>
     </div>
 
@@ -380,17 +379,16 @@
     let allSignups = {};   // eventId -> [signup]
     let sportFilter = 'all';
 
-    // Build the sport filter buttons from whatever sports are actually in CALENDARS,
+    // Build the sport filter <option>s from whatever sports are actually in CALENDARS,
     // instead of a hardcoded list that silently goes stale as teams get added.
-    function renderSportFilterButtons() {
-        const container = document.getElementById('sport-filter');
+    function renderSportFilterOptions() {
+        const select = document.getElementById('sport-filter');
         const sports = [...new Set(CALENDARS.map(c => c.sport))].sort();
         for (const sport of sports) {
-            const btn = document.createElement('button');
-            btn.className = 'filter-btn';
-            btn.textContent = sport;
-            btn.onclick = () => setSportFilter(sport, btn);
-            container.appendChild(btn);
+            const opt = document.createElement('option');
+            opt.value = sport;
+            opt.textContent = sport;
+            select.appendChild(opt);
         }
     }
 
@@ -398,13 +396,12 @@
     async function loadGames() {
         const results = await Promise.all(CALENDARS.map(async cal => {
             try {
-                const r = await fetch(cal.url);
+                const r = await fetch(`/api/ics-proxy?url=${encodeURIComponent(cal.url)}`);
                 const ics = await r.text();
                 return parseICS(ics, cal);
             } catch { return []; }
         }));
         allGames = results.flat()
-            .filter(g => !g.isAway && !g.isCancelled)
             .sort((a, b) => a.date - b.date);
         renderSports();
     }
@@ -460,10 +457,8 @@
         renderSports();
     });
 
-    window.setSportFilter = function(sport, btn) {
+    window.setSportFilter = function(sport) {
         sportFilter = sport;
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
         renderSports();
     };
 
@@ -510,7 +505,7 @@
         }).join('') + '</div>';
     }
 
-    renderSportFilterButtons();
+    renderSportFilterOptions();
     loadGames();
 
     // ─── BANNERS ──────────────────────────────────────────────────────────────

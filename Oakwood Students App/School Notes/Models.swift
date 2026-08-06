@@ -7,6 +7,11 @@ import Charts
 import FirebaseFirestore
 import CloudKit
 import PDFKit
+// Not iOS-guarded: UserNotifications/UNUserNotificationCenter works identically on macOS,
+// and scheduleEventReminders/scheduleFollowedClubEventReminders below are used from both
+// the iOS and macOS targets (unlike checkForNewClubAnnouncements, whose iOS-only body kept
+// this import iOS-only previously).
+import UserNotifications
 
 // MARK: - API Response Types
 
@@ -64,7 +69,6 @@ extension Assignment {
         let f = DateFormatter()
         f.dateFormat = "MM/dd/yyyy"
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
         return f
     }()
 
@@ -116,6 +120,51 @@ func assignmentTypeColor(_ type: String) -> Color {
     case "Homework": return .blue
     default: return .green
     }
+}
+
+// MARK: - Onboarding Shared Data
+//
+// Shared between OnboardingView.swift (iOS, platform-filtered out of the macOS target)
+// and Mac/Mac_OnboardingView.swift (macOS). Declared here — a file with no platform
+// filter — so both targets see these as ordinary same-module symbols.
+
+struct OnboardingFeature {
+    let icon: String
+    let color: Color
+    let title: String
+    let description: String
+}
+
+let onboardingFeatures: [OnboardingFeature] = [
+    OnboardingFeature(
+        icon: "newspaper.fill",
+        color: .oakwoodGreen,
+        title: "Inside Scoop",
+        description: "Stay up to date with Oakwood news, campus announcements, and what's happening today."
+    ),
+    OnboardingFeature(
+        icon: "list.bullet.rectangle.portrait.fill",
+        color: .oakwoodGreen,
+        title: "Grades & Assignments",
+        description: "View your grades and upcoming assignments from Veracross — all in one place."
+    ),
+    OnboardingFeature(
+        icon: "figure.run",
+        color: .oakwoodGreen,
+        title: "Sports",
+        description: "Follow Oakwood sports schedules, live scores, and sign up to work games."
+    ),
+    OnboardingFeature(
+        icon: "heart.fill",
+        color: .oakwoodGreen,
+        title: "Service & More",
+        description: "Track your community service hours and access links and resources."
+    ),
+]
+
+extension Color {
+    static let oakwoodGreen = Color(red: 0.13, green: 0.55, blue: 0.27)
+    static let oakwoodGreenLight = Color(red: 0.22, green: 0.78, blue: 0.40)
 }
 
 // MARK: - Badge View
@@ -305,6 +354,8 @@ struct SignatureImageView: View {
     var body: some View {
         if let image {
             image.resizable().scaledToFit()
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
     }
 
@@ -860,15 +911,22 @@ extension FirebaseService {
         }.sorted { $0.date < $1.date }
     }
 
-    func saveClubEvent(clubId: String, event: ClubEvent) async throws {
+    func saveClubEvent(clubId: String, clubName: String, authorName: String, event: ClubEvent) async throws {
+        let isNewEvent = event.id.isEmpty
         let data: [String: Any] = ["title": event.title, "date": Timestamp(date: event.date),
                                    "location": event.location, "description": event.description]
-        if event.id.isEmpty { try await eventsRef(clubId).addDocument(data: data) }
+        if isNewEvent { try await eventsRef(clubId).addDocument(data: data) }
         else { try await eventsRef(clubId).document(event.id).setData(data) }
+        // Best-effort: only pings followers for genuinely new events, never edits — mirrors
+        // saveClubAnnouncement's use of touchClubActivity below.
+        if isNewEvent {
+            try? await touchClubActivity(clubId: clubId, clubName: clubName, announcementTitle: "New Event: \(event.title)", authorName: authorName)
+        }
     }
 
     func deleteClubEvent(clubId: String, eventId: String) async throws {
         try await eventsRef(clubId).document(eventId).delete()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["event-\(eventId)-1hr", "event-\(eventId)-start"])
     }
 
     func fetchClubAnnouncements(clubId: String) async throws -> [ClubAnnouncement] {
@@ -880,10 +938,14 @@ extension FirebaseService {
         }.sorted { $0.postedAt > $1.postedAt }
     }
 
-    func saveClubAnnouncement(clubId: String, ann: ClubAnnouncement) async throws {
+    func saveClubAnnouncement(clubId: String, clubName: String, ann: ClubAnnouncement) async throws {
         let data: [String: Any] = ["title": ann.title, "message": ann.message,
                                    "postedAt": Timestamp(date: ann.postedAt), "authorName": ann.authorName]
         try await announcementsRef(clubId).addDocument(data: data)
+        // Best-effort: pings a lightweight CloudKit record so followers of this club get a
+        // push notification via their CKQuerySubscription. Never blocks/fails the actual
+        // announcement post, which is the primary action here.
+        try? await touchClubActivity(clubId: clubId, clubName: clubName, announcementTitle: ann.title, authorName: ann.authorName)
     }
 
     func deleteClubAnnouncement(clubId: String, announcementId: String) async throws {
@@ -908,6 +970,19 @@ extension FirebaseService {
     }
 }
 
+/// Looks up every club officer role this person holds, matched by email (case-insensitive) since
+/// names alone aren't reliably unique. Used by the Directory feature to surface a person's club
+/// involvement on their profile — best-effort, returns empty on any failure or if the person has
+/// no directory email on file.
+func fetchClubRoles(forEmail email: String) async -> [(clubName: String, role: String)] {
+    guard !email.isEmpty else { return [] }
+    let clubs = (try? await FirebaseService.shared.fetchClubs()) ?? []
+    return clubs.flatMap { club in
+        club.officers.filter { $0.email.lowercased() == email.lowercased() }
+            .map { (clubName: club.name, role: $0.role) }
+    }
+}
+
 // MARK: - Club Theme
 
 struct ClubTheme: Identifiable {
@@ -920,22 +995,23 @@ struct ClubTheme: Identifiable {
     }
 
     static let presets: [ClubTheme] = [
-        ClubTheme(id: "sunset", name: "Sunset", colors: [Color(red: 1.00, green: 0.49, blue: 0.37), Color(red: 0.99, green: 0.71, blue: 0.48)]),
-        ClubTheme(id: "ocean", name: "Ocean", colors: [Color(red: 0.02, green: 0.51, blue: 0.71), Color(red: 0.29, green: 0.79, blue: 0.85)]),
-        ClubTheme(id: "forest", name: "Forest", colors: [Color(red: 0.13, green: 0.45, blue: 0.27), Color(red: 0.42, green: 0.68, blue: 0.35)]),
-        ClubTheme(id: "grape", name: "Grape", colors: [Color(red: 0.42, green: 0.13, blue: 0.55), Color(red: 0.65, green: 0.34, blue: 0.83)]),
+        ClubTheme(id: "sunset", name: "Sunset", colors: [Color(red: 0.80, green: 0.47, blue: 0.40), Color(red: 0.83, green: 0.64, blue: 0.49)]),
+        ClubTheme(id: "ocean", name: "Ocean", colors: [Color(red: 0.12, green: 0.43, blue: 0.56), Color(red: 0.35, green: 0.67, blue: 0.71)]),
+        ClubTheme(id: "forest", name: "Forest", colors: [Color(red: 0.15, green: 0.40, blue: 0.26), Color(red: 0.41, green: 0.61, blue: 0.36)]),
+        ClubTheme(id: "grape", name: "Grape", colors: [Color(red: 0.36, green: 0.18, blue: 0.45), Color(red: 0.57, green: 0.37, blue: 0.69)]),
+        // "Midnight" is the reference point everything else was toned down to match — leave unchanged.
         ClubTheme(id: "midnight", name: "Midnight", colors: [Color(red: 0.10, green: 0.12, blue: 0.24), Color(red: 0.25, green: 0.29, blue: 0.48)]),
-        ClubTheme(id: "coral", name: "Coral", colors: [Color(red: 0.98, green: 0.42, blue: 0.42), Color(red: 0.99, green: 0.62, blue: 0.62)]),
-        ClubTheme(id: "gold", name: "Gold", colors: [Color(red: 0.85, green: 0.65, blue: 0.13), Color(red: 0.96, green: 0.82, blue: 0.40)]),
+        ClubTheme(id: "coral", name: "Coral", colors: [Color(red: 0.79, green: 0.43, blue: 0.43), Color(red: 0.83, green: 0.59, blue: 0.59)]),
+        ClubTheme(id: "gold", name: "Gold", colors: [Color(red: 0.65, green: 0.54, blue: 0.24), Color(red: 0.77, green: 0.69, blue: 0.45)]),
         ClubTheme(id: "slate", name: "Slate", colors: [Color(red: 0.30, green: 0.34, blue: 0.39), Color(red: 0.55, green: 0.60, blue: 0.65)]),
-        ClubTheme(id: "rose", name: "Rose", colors: [Color(red: 0.85, green: 0.20, blue: 0.45), Color(red: 0.98, green: 0.55, blue: 0.70)]),
-        ClubTheme(id: "teal", name: "Teal", colors: [Color(red: 0.00, green: 0.50, blue: 0.50), Color(red: 0.35, green: 0.78, blue: 0.75)]),
-        ClubTheme(id: "indigo", name: "Indigo", colors: [Color(red: 0.29, green: 0.24, blue: 0.63), Color(red: 0.55, green: 0.48, blue: 0.85)]),
-        ClubTheme(id: "crimson", name: "Crimson", colors: [Color(red: 0.70, green: 0.11, blue: 0.15), Color(red: 0.90, green: 0.30, blue: 0.30)]),
-        ClubTheme(id: "mint", name: "Mint", colors: [Color(red: 0.15, green: 0.65, blue: 0.50), Color(red: 0.55, green: 0.90, blue: 0.75)]),
-        ClubTheme(id: "amber", name: "Amber", colors: [Color(red: 0.90, green: 0.45, blue: 0.05), Color(red: 0.99, green: 0.65, blue: 0.30)]),
+        ClubTheme(id: "rose", name: "Rose", colors: [Color(red: 0.68, green: 0.26, blue: 0.42), Color(red: 0.82, green: 0.54, blue: 0.64)]),
+        ClubTheme(id: "teal", name: "Teal", colors: [Color(red: 0.08, green: 0.41, blue: 0.41), Color(red: 0.38, green: 0.67, blue: 0.65)]),
+        ClubTheme(id: "indigo", name: "Indigo", colors: [Color(red: 0.28, green: 0.25, blue: 0.51), Color(red: 0.51, green: 0.47, blue: 0.72)]),
+        ClubTheme(id: "crimson", name: "Crimson", colors: [Color(red: 0.53, green: 0.16, blue: 0.18), Color(red: 0.70, green: 0.32, blue: 0.32)]),
+        ClubTheme(id: "mint", name: "Mint", colors: [Color(red: 0.21, green: 0.51, blue: 0.42), Color(red: 0.53, green: 0.75, blue: 0.66)]),
+        ClubTheme(id: "amber", name: "Amber", colors: [Color(red: 0.66, green: 0.40, blue: 0.17), Color(red: 0.77, green: 0.57, blue: 0.37)]),
         ClubTheme(id: "steel", name: "Steel", colors: [Color(red: 0.20, green: 0.35, blue: 0.50), Color(red: 0.45, green: 0.60, blue: 0.75)]),
-        ClubTheme(id: "plum", name: "Plum", colors: [Color(red: 0.35, green: 0.15, blue: 0.30), Color(red: 0.60, green: 0.35, blue: 0.55)]),
+        ClubTheme(id: "plum", name: "Plum", colors: [Color(red: 0.31, green: 0.16, blue: 0.27), Color(red: 0.53, green: 0.35, blue: 0.50)]),
     ]
 
     static func preset(id: String?) -> ClubTheme? {
@@ -1070,6 +1146,539 @@ func uploadClubBackgroundImage(clubId: String, version: Int, imageData: Data) as
     ImageDataCache.shared.store(compressed, for: "clubBackground-\(clubId)-\(version)")
 }
 
+// MARK: - Club Activity / Follow Notifications
+//
+// A single "ping" record per club (recordName = club id, so it's trivially upsertable)
+// rather than one record per announcement — keeps this simple and avoids unbounded record
+// growth. Followers subscribe with a CKQuerySubscription filtered to their club's id, so a
+// create/update of this one record fires a push to everyone following that club.
+
+/// Upserts the activity record for a club whenever it posts a new announcement. Uses
+/// `.changedKeys` (not the default `.save`/`.ifServerRecordUnchanged` policy) since this
+/// record already exists after the first post — see `uploadClubBackgroundImage` above for
+/// the same lesson learned with club background images.
+func touchClubActivity(clubId: String, clubName: String, announcementTitle: String, authorName: String) async throws {
+    let record = CKRecord(recordType: "ClubActivity", recordID: CKRecord.ID(recordName: "club-activity-\(clubId)"))
+    record["clubId"] = clubId
+    record["clubName"] = clubName
+    record["announcementTitle"] = announcementTitle
+    record["authorName"] = authorName
+    record["postedAt"] = Date()
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.modifyRecords(saving: [record], deleting: [], savePolicy: .changedKeys)
+        print("[ClubActivity] Touched activity record for club \(clubId) (\(clubName)), announcement: \"\(announcementTitle)\"")
+    } catch {
+        print("[ClubActivity] FAILED to touch activity record for club \(clubId) (\(clubName)), announcement: \"\(announcementTitle)\": \(error)")
+        if let ckError = error as? CKError {
+            print("[ClubActivity] CKError code: \(ckError.code.rawValue), description: \(ckError.localizedDescription)")
+            if let partialErrors = ckError.userInfo[CKPartialErrorsByItemIDKey] as? [CKRecord.ID: Error] {
+                for (itemID, itemError) in partialErrors {
+                    print("[ClubActivity] Partial error for item \(itemID): \(itemError)")
+                }
+            }
+        }
+        // Preserve existing behavior: rethrow so callers (currently `try?`) see no change
+        // in control flow — this is diagnostic instrumentation only.
+        throw error
+    }
+}
+
+/// Creates a CKQuerySubscription so this device gets a push notification whenever the given
+/// club's ClubActivity record is created or updated (i.e. whenever it posts). Best-effort —
+/// a failure here (e.g. offline, iCloud not signed in) shouldn't block the follow action.
+func subscribeToClubActivity(clubId: String) async {
+    let predicate = NSPredicate(format: "clubId == %@", clubId)
+    let subscription = CKQuerySubscription(
+        recordType: "ClubActivity",
+        predicate: predicate,
+        subscriptionID: "club-follow-\(clubId)",
+        options: [.firesOnRecordCreation, .firesOnRecordUpdate]
+    )
+    // Silent push (no alert/sound of its own) — CloudKit's own alert templating needs a
+    // properly-registered Localizable.strings in an .lproj folder, which this project has
+    // never had set up. Instead this just wakes the app, which then builds the real
+    // notification text itself in checkForNewClubAnnouncements() and fires it as a local
+    // notification — reusing code that's already proven to produce correct dynamic text.
+    let info = CKSubscription.NotificationInfo()
+    info.shouldSendContentAvailable = true
+    subscription.notificationInfo = info
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.save(subscription)
+        print("[ClubActivity] Subscribed to club \(clubId)")
+    } catch {
+        print("[ClubActivity] FAILED to subscribe to club \(clubId): \(error)")
+        if let ckError = error as? CKError {
+            print("[ClubActivity] CKError code: \(ckError.code.rawValue), description: \(ckError.localizedDescription)")
+            if let partialErrors = ckError.userInfo[CKPartialErrorsByItemIDKey] as? [CKRecord.ID: Error] {
+                for (itemID, itemError) in partialErrors {
+                    print("[ClubActivity] Partial error for item \(itemID): \(itemError)")
+                }
+            }
+        }
+    }
+}
+
+/// Removes the CKQuerySubscription created by `subscribeToClubActivity` when a student
+/// unfollows a club. Best-effort — no harm if the subscription is already gone.
+func unsubscribeFromClubActivity(clubId: String) async {
+    do {
+        try await CKContainer.default().publicCloudDatabase.deleteSubscription(withID: "club-follow-\(clubId)")
+        print("[ClubActivity] Unsubscribed from club \(clubId)")
+    } catch {
+        print("[ClubActivity] FAILED to unsubscribe from club \(clubId): \(error)")
+        if let ckError = error as? CKError {
+            print("[ClubActivity] CKError code: \(ckError.code.rawValue), description: \(ckError.localizedDescription)")
+        }
+    }
+}
+
+// Background-poll fallback for club announcement notifications — CKQuerySubscription-based
+// push (see subscribeToClubActivity) is fully built and correctly configured but appears to
+// be hitting a genuine Apple-side CloudKit push delivery bug (extensively verified: subscription
+// confirmed created and correctly configured via CloudKit Dashboard, schema/indexes correct in
+// both Development and Production, manual APNs test push to the device works, cross-device
+// tested, fresh club/fresh subscription still doesn't fire). This periodically polls each
+// followed club's ClubActivity record directly (a plain CKRecord fetch, same mechanism proven
+// working for club background images) and fires a LOCAL notification for anything new, instead
+// of depending on push at all.
+func checkForNewClubAnnouncements() async {
+    #if os(iOS)
+    guard let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
+          let followedClubIDs = try? JSONDecoder().decode(Set<String>.self, from: data),
+          !followedClubIDs.isEmpty else { return }
+
+    var lastSeen = (UserDefaults(suiteName: appGroupID)?.dictionary(forKey: "lastSeenClubActivity") as? [String: TimeInterval]) ?? [:]
+
+    for clubId in followedClubIDs {
+        guard let record = try? await CKContainer.default().publicCloudDatabase.record(for: CKRecord.ID(recordName: "club-activity-\(clubId)")),
+              let postedAt = record["postedAt"] as? Date else { continue }
+
+        let clubName = record["clubName"] as? String ?? "A club you follow"
+        let announcementTitle = record["announcementTitle"] as? String ?? "New announcement"
+        let authorName = record["authorName"] as? String ?? ""
+
+        let lastSeenTime = lastSeen[clubId].map { Date(timeIntervalSince1970: $0) } ?? .distantPast
+        guard postedAt > lastSeenTime else { continue }
+
+        lastSeen[clubId] = postedAt.timeIntervalSince1970
+
+        let content = UNMutableNotificationContent()
+        content.title = clubName
+        content.body = authorName.isEmpty ? announcementTitle : "\(announcementTitle) — \(authorName)"
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "club-\(clubId)-\(Int(postedAt.timeIntervalSince1970))",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { print("[ClubActivity] Failed to send local notification: \(error)") }
+        }
+    }
+
+    UserDefaults(suiteName: appGroupID)?.set(lastSeen, forKey: "lastSeenClubActivity")
+    #endif
+}
+
+/// Schedules "1 hour before" and "starting now" local notification reminders for a club's
+/// upcoming events. Uses stable per-event identifiers so calling this again for the same
+/// events (e.g. on every background refresh or page visit) harmlessly replaces the existing
+/// pending request rather than creating duplicates — UNUserNotificationCenter.add(_:) with an
+/// identifier that already exists just updates it in place.
+func scheduleEventReminders(clubName: String, events: [ClubEvent]) {
+    let now = Date()
+    for event in events where event.date > now {
+        let locationSuffix = event.location.isEmpty ? "" : " · \(event.location)"
+        let oneHourBefore = event.date.addingTimeInterval(-3600)
+        if oneHourBefore > now {
+            scheduleEventLocalNotification(
+                id: "event-\(event.id)-1hr",
+                title: clubName,
+                body: "\(event.title) starts in 1 hour" + locationSuffix,
+                date: oneHourBefore
+            )
+        }
+        scheduleEventLocalNotification(
+            id: "event-\(event.id)-start",
+            title: clubName,
+            body: "\(event.title) is starting now" + locationSuffix,
+            date: event.date
+        )
+    }
+}
+
+private func scheduleEventLocalNotification(id: String, title: String, body: String, date: Date) {
+    let content = UNMutableNotificationContent()
+    content.title = title
+    content.body = body
+    content.sound = .default
+    let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+    let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+    let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+    UNUserNotificationCenter.current().add(request)
+}
+
+/// Scans every club this device follows and (re)schedules event reminders for all of their
+/// upcoming events — the "keep reminders fresh in the background" sweep, mirroring
+/// checkForNewClubAnnouncements()'s followed-club scan. Called from the same trigger points
+/// (background refresh, silent push wake-up, and Mac's clubs-list appearance since macOS has
+/// no background-refresh task) so reminders exist even for events the user never personally
+/// opens that club's page to see. Not #if os(iOS) guarded — UNUserNotificationCenter works
+/// identically on iOS and macOS, and reminders should fire on both platforms.
+func scheduleFollowedClubEventReminders() async {
+    guard let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
+          let followedClubIDs = try? JSONDecoder().decode(Set<String>.self, from: data),
+          !followedClubIDs.isEmpty else { return }
+    let clubs = (try? await FirebaseService.shared.fetchClubs()) ?? []
+    for clubId in followedClubIDs {
+        guard let club = clubs.first(where: { $0.id == clubId }) else { continue }
+        let events = (try? await FirebaseService.shared.fetchClubEvents(clubId: clubId)) ?? []
+        scheduleEventReminders(clubName: club.name, events: events)
+    }
+}
+
+/// Deletes every `club-follow-*` subscription on the account (regardless of which clubId it's
+/// for) and recreates one fresh subscription per currently-followed club. Use this to clear out
+/// orphaned/duplicate subscriptions — e.g. leftovers from a deleted test club, or ones created
+/// under an older `NotificationInfo` config before a code change — without needing to figure out
+/// which specific stale IDs are safe to remove. A clean slate that's guaranteed to end up
+/// matching exactly what's followed on this device right now.
+func resetClubSubscriptions(followedClubIDs: Set<String>) async -> String {
+    var log = ""
+    do {
+        let subscriptions = try await CKContainer.default().publicCloudDatabase.allSubscriptions()
+        let followSubscriptionIDs = subscriptions.map(\.subscriptionID).filter { $0.hasPrefix("club-follow-") }
+        if !followSubscriptionIDs.isEmpty {
+            _ = try await CKContainer.default().publicCloudDatabase.modifySubscriptions(saving: [], deleting: followSubscriptionIDs)
+            log += "Deleted \(followSubscriptionIDs.count) existing club-follow subscription(s).\n"
+        } else {
+            log += "No existing club-follow subscriptions found.\n"
+        }
+    } catch {
+        log += "Failed to fetch/delete existing subscriptions: \(error)\n"
+        print("[ClubActivity] resetClubSubscriptions — delete step failed: \(error)")
+    }
+
+    for clubId in followedClubIDs {
+        await subscribeToClubActivity(clubId: clubId)
+    }
+    log += "Recreated \(followedClubIDs.count) subscription(s) for currently followed club(s)."
+    print("[ClubActivity] resetClubSubscriptions: \(log)")
+    return log
+}
+
+// DIAGNOSTIC TEST ONLY — isolates whether CKQuerySubscription's predicate
+// evaluation specifically is broken, vs. CloudKit push delivery in general.
+// CKDatabaseSubscription fires on ANY public-database change, no predicate.
+func subscribeToDatabaseTest() async {
+    let subscription = CKDatabaseSubscription(subscriptionID: "test-database-subscription")
+    let info = CKSubscription.NotificationInfo()
+    info.alertBody = "Database changed (test)"
+    info.soundName = "default"
+    subscription.notificationInfo = info
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.save(subscription)
+        print("[DatabaseSubscriptionTest] Subscribed to database-wide changes")
+    } catch {
+        print("[DatabaseSubscriptionTest] FAILED to subscribe: \(error)")
+        if let ckError = error as? CKError {
+            print("[DatabaseSubscriptionTest] CKError code: \(ckError.code.rawValue), description: \(ckError.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - CloudKit Notification Lab (Debug diagnostics)
+//
+// The CKQuerySubscription used by `subscribeToClubActivity` is confirmed correctly configured
+// (verified via CloudKit Dashboard: subscription exists, matches expected config, schema/indexes
+// correct in both Development and Production) yet the Dashboard's raw event Logs show zero
+// `NotificationSend` events ever — CloudKit's backend isn't even attempting delivery. These
+// functions each try a different configuration variation to isolate what (if anything) makes
+// push delivery actually fire. Each one is self-contained: it subscribes AND immediately writes
+// a matching record in the same call, eliminating any timing gap between separate follow/post
+// actions across different UI flows. All print output is prefixed `[CloudKitLab]` for easy
+// filtering in Xcode's console.
+
+/// Variation 1: a CKQuerySubscription with EVERY reasonable `NotificationInfo` field explicitly
+/// set (not just alertBody/soundName), on a brand-new never-before-used subscriptionID, matched
+/// against a dedicated TEST record so it can't interfere with real club data.
+func testFullyExplicitSubscription() async -> String {
+    let testId = "lab-test-\(Int(Date().timeIntervalSince1970))"
+    var log = ""
+
+    let predicate = NSPredicate(format: "clubId == %@", testId)
+    let subscription = CKQuerySubscription(
+        recordType: "ClubActivity",
+        predicate: predicate,
+        subscriptionID: "lab-sub-\(testId)",
+        options: [.firesOnRecordCreation, .firesOnRecordUpdate]
+    )
+    let info = CKSubscription.NotificationInfo()
+    info.alertBody = "Lab test notification"
+    info.title = "CloudKit Lab Test"
+    info.soundName = "default"
+    info.shouldBadge = true
+    info.shouldSendContentAvailable = false
+    info.desiredKeys = ["clubId", "clubName", "announcementTitle", "authorName", "postedAt"]
+    info.category = "LAB_TEST"
+    subscription.notificationInfo = info
+
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.save(subscription)
+        log += "Subscribe: SUCCESS\n"
+    } catch {
+        log += "Subscribe: FAILED — \(error)\n"
+        print("[CloudKitLab] testFullyExplicitSubscription — Subscribe failed: \(error)")
+        return log
+    }
+
+    // Small delay to let the subscription register before triggering it.
+    try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+    let record = CKRecord(recordType: "ClubActivity", recordID: CKRecord.ID(recordName: "lab-record-\(testId)"))
+    record["clubId"] = testId
+    record["clubName"] = "Lab Test Club"
+    record["announcementTitle"] = "Lab test announcement"
+    record["authorName"] = "Diagnostic"
+    record["postedAt"] = Date()
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.modifyRecords(saving: [record], deleting: [], savePolicy: .changedKeys)
+        log += "Matching record write: SUCCESS (testId: \(testId))\n"
+    } catch {
+        log += "Matching record write: FAILED — \(error)\n"
+        print("[CloudKitLab] testFullyExplicitSubscription — Record write failed: \(error)")
+    }
+
+    print("[CloudKitLab] testFullyExplicitSubscription: \(log)")
+    return log
+}
+
+/// Variation 2: per Apple's own QA1917 debugging recommendation, uses `NSPredicate(value: true)`
+/// (matches literally any ClubActivity record, no field filtering at all) instead of a specific
+/// clubId match. Isolates whether predicate evaluation itself is the broken part, vs. general
+/// subscription delivery.
+func testWildcardPredicateSubscription() async -> String {
+    let testId = "lab-test-wildcard-\(Int(Date().timeIntervalSince1970))"
+    var log = ""
+
+    let predicate = NSPredicate(value: true)
+    let subscription = CKQuerySubscription(
+        recordType: "ClubActivity",
+        predicate: predicate,
+        subscriptionID: "lab-sub-wildcard-\(testId)",
+        options: [.firesOnRecordCreation, .firesOnRecordUpdate]
+    )
+    let info = CKSubscription.NotificationInfo()
+    info.alertBody = "Lab test notification"
+    info.title = "CloudKit Lab Test (wildcard)"
+    info.soundName = "default"
+    info.shouldBadge = true
+    info.shouldSendContentAvailable = false
+    info.desiredKeys = ["clubId", "clubName", "announcementTitle", "authorName", "postedAt"]
+    info.category = "LAB_TEST"
+    subscription.notificationInfo = info
+
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.save(subscription)
+        log += "Subscribe (wildcard predicate): SUCCESS\n"
+    } catch {
+        log += "Subscribe (wildcard predicate): FAILED — \(error)\n"
+        print("[CloudKitLab] testWildcardPredicateSubscription — Subscribe failed: \(error)")
+        return log
+    }
+
+    // Small delay to let the subscription register before triggering it.
+    try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+    // Any ClubActivity record will match a `value: true` predicate.
+    let record = CKRecord(recordType: "ClubActivity", recordID: CKRecord.ID(recordName: "lab-record-\(testId)"))
+    record["clubId"] = testId
+    record["clubName"] = "Lab Test Club (wildcard)"
+    record["announcementTitle"] = "Lab wildcard test announcement"
+    record["authorName"] = "Diagnostic"
+    record["postedAt"] = Date()
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.modifyRecords(saving: [record], deleting: [], savePolicy: .changedKeys)
+        log += "Matching record write: SUCCESS (testId: \(testId))\n"
+    } catch {
+        log += "Matching record write: FAILED — \(error)\n"
+        print("[CloudKitLab] testWildcardPredicateSubscription — Record write failed: \(error)")
+    }
+
+    print("[CloudKitLab] testWildcardPredicateSubscription: \(log)")
+    return log
+}
+
+/// Variation 3: try `CKRecordZoneSubscription` (the third CloudKit subscription type, alongside
+/// Query and Database) against the public database's default zone. This might fail with the
+/// same "Metasync subscriptions are not allowed in public database" error `CKDatabaseSubscription`
+/// hit — that's a valid, useful result either way.
+func testRecordZoneSubscription() async -> String {
+    let subscription = CKRecordZoneSubscription(
+        zoneID: CKRecordZone.default().zoneID,
+        subscriptionID: "lab-zone-sub-\(Int(Date().timeIntervalSince1970))"
+    )
+    let info = CKSubscription.NotificationInfo()
+    info.alertBody = "Lab zone test notification"
+    info.soundName = "default"
+    subscription.notificationInfo = info
+    do {
+        _ = try await CKContainer.default().publicCloudDatabase.save(subscription)
+        print("[CloudKitLab] testRecordZoneSubscription: CKRecordZoneSubscription save: SUCCESS")
+        return "CKRecordZoneSubscription save: SUCCESS"
+    } catch {
+        print("[CloudKitLab] testRecordZoneSubscription — Zone subscription failed: \(error)")
+        if let ckError = error as? CKError {
+            print("[CloudKitLab] testRecordZoneSubscription — CKError code: \(ckError.code.rawValue), description: \(ckError.localizedDescription)")
+        }
+        return "CKRecordZoneSubscription save: FAILED — \(error)"
+    }
+}
+
+/// Variation 4: client-side sanity check — lists every subscription the app itself can currently
+/// see for this container/database via `CKDatabase.allSubscriptions()`, confirming from the
+/// CLIENT's own perspective (not just the Dashboard) exactly what subscriptions exist right now.
+///
+/// NOTE ON API CERTAINTY: `CKDatabase.allSubscriptions() async throws -> [CKSubscription]` is the
+/// modern async replacement for `CKFetchSubscriptionsOperation` (fetching ALL subscriptions, as
+/// opposed to `subscription(for:)` which fetches one by ID). It has shipped since iOS 15 /
+/// macOS 12. This is a good-faith best attempt at the real, current API surface.
+func fetchAllMySubscriptions() async -> String {
+    do {
+        let subscriptions = try await CKContainer.default().publicCloudDatabase.allSubscriptions()
+        guard !subscriptions.isEmpty else {
+            print("[CloudKitLab] fetchAllMySubscriptions: no subscriptions found")
+            return "No subscriptions found on this database."
+        }
+        var log = "Found \(subscriptions.count) subscription(s):\n"
+        for sub in subscriptions {
+            var line = "- ID: \(sub.subscriptionID), type: \(sub.subscriptionType.rawValue)"
+            if let querySub = sub as? CKQuerySubscription {
+                line += ", recordType: \(querySub.recordType), predicate: \(querySub.predicate)"
+            } else if let zoneSub = sub as? CKRecordZoneSubscription {
+                line += ", zoneID: \(zoneSub.zoneID)"
+            }
+            log += line + "\n"
+        }
+        print("[CloudKitLab] fetchAllMySubscriptions: \(log)")
+        return log
+    } catch {
+        print("[CloudKitLab] fetchAllMySubscriptions — FAILED: \(error)")
+        return "Fetch subscriptions: FAILED — \(error)"
+    }
+}
+
+/// Variation 5: identical scenario to `testWildcardPredicateSubscription`, but built with the
+/// older, explicit `CKModifySubscriptionsOperation` / `CKModifyRecordsOperation` API instead of
+/// the async/await convenience methods (`CKDatabase.save(_:)` / `CKDatabase.modifyRecords`) that
+/// every other lab test — and all of production — exclusively uses. This isolates whether the
+/// async convenience wrappers are silently leaving something mis-configured (e.g.
+/// `qualityOfService`, operation-level config) that the explicit Operation path sets correctly.
+///
+/// NOTE ON API CERTAINTY: `modifySubscriptionsResultBlock` and `modifyRecordsResultBlock` are the
+/// modern iOS 15+ result-block completion properties (`((Result<Void, Error>) -> Void)?`),
+/// replacing the deprecated `modifySubscriptionsCompletionBlock` / `modifyRecordsCompletionBlock`.
+/// This is a good-faith best attempt at the real, current API surface.
+func testOperationBasedSubscription() async -> String {
+    let testId = "lab-op-test-\(Int(Date().timeIntervalSince1970))"
+    var log = ""
+
+    let predicate = NSPredicate(value: true)
+    let subscription = CKQuerySubscription(
+        recordType: "ClubActivity",
+        predicate: predicate,
+        subscriptionID: "lab-op-sub-\(testId)",
+        options: [.firesOnRecordCreation, .firesOnRecordUpdate]
+    )
+    let info = CKSubscription.NotificationInfo()
+    info.alertBody = "Lab operation-based test notification"
+    info.soundName = "default"
+    subscription.notificationInfo = info
+
+    let operation = CKModifySubscriptionsOperation(subscriptionsToSave: [subscription], subscriptionIDsToDelete: nil)
+    operation.qualityOfService = .userInitiated
+
+    log += await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+        operation.modifySubscriptionsResultBlock = { result in
+            switch result {
+            case .success:
+                continuation.resume(returning: "Operation-based subscribe: SUCCESS\n")
+            case .failure(let error):
+                print("[CloudKitLab] Operation-based subscribe failed: \(error)")
+                continuation.resume(returning: "Operation-based subscribe: FAILED — \(error)\n")
+            }
+        }
+        CKContainer.default().publicCloudDatabase.add(operation)
+    }
+
+    // Small delay to let the subscription register before writing a matching record.
+    try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+    let record = CKRecord(recordType: "ClubActivity", recordID: CKRecord.ID(recordName: "lab-op-record-\(testId)"))
+    record["clubId"] = testId
+    record["clubName"] = "Lab Operation Test Club"
+    record["announcementTitle"] = "Lab operation-based test announcement"
+    record["authorName"] = "Diagnostic"
+    record["postedAt"] = Date()
+
+    let recordOp = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
+    recordOp.savePolicy = .changedKeys
+    recordOp.qualityOfService = .userInitiated
+
+    log += await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+        recordOp.modifyRecordsResultBlock = { result in
+            switch result {
+            case .success:
+                continuation.resume(returning: "Operation-based record write: SUCCESS (testId: \(testId))\n")
+            case .failure(let error):
+                continuation.resume(returning: "Operation-based record write: FAILED — \(error)\n")
+            }
+        }
+        CKContainer.default().publicCloudDatabase.add(recordOp)
+    }
+
+    print("[CloudKitLab] testOperationBasedSubscription: \(log)")
+    return log
+}
+
+/// Cleanup: removes leftover diagnostic subscriptions created by the lab test functions above.
+/// These all used broad/test predicates (several use `NSPredicate(value: true)`, matching ANY
+/// `ClubActivity` record change) and were never torn down after testing, so they kept firing
+/// extra pushes alongside the real `club-follow-<clubId>` subscription on every genuine club
+/// announcement. Matches every subscriptionID prefix produced by the lab functions in this file
+/// (`lab-sub-...` from testFullyExplicitSubscription/testWildcardPredicateSubscription,
+/// `lab-op-sub-...` from testOperationBasedSubscription, `lab-zone-sub-...` from
+/// testRecordZoneSubscription — included defensively even though that one failed to save — and
+/// the standalone `test-database-subscription` from subscribeToDatabaseTest, which also failed
+/// outright but is filtered defensively in case of partial success). Deliberately does NOT match
+/// `club-follow-*`, the real, working per-club follow subscriptions created by
+/// `subscribeToClubActivity` — those must never be touched by this cleanup.
+func cleanUpLabSubscriptions() async -> String {
+    do {
+        let subscriptions = try await CKContainer.default().publicCloudDatabase.allSubscriptions()
+        let labSubscriptions = subscriptions.filter { $0.subscriptionID.hasPrefix("lab-") || $0.subscriptionID == "test-database-subscription" }
+        guard !labSubscriptions.isEmpty else {
+            print("[CloudKitLab] cleanUpLabSubscriptions: no leftover lab subscriptions found")
+            return "No leftover lab subscriptions found."
+        }
+
+        var log = "Found \(labSubscriptions.count) lab subscription(s) to remove:\n"
+        for sub in labSubscriptions {
+            do {
+                try await CKContainer.default().publicCloudDatabase.deleteSubscription(withID: sub.subscriptionID)
+                log += "Deleted: \(sub.subscriptionID)\n"
+            } catch {
+                log += "FAILED to delete \(sub.subscriptionID): \(error)\n"
+            }
+        }
+        print("[CloudKitLab] cleanUpLabSubscriptions: \(log)")
+        return log
+    } catch {
+        print("[CloudKitLab] cleanUpLabSubscriptions failed to list subscriptions: \(error)")
+        return "Failed to list subscriptions: \(error)"
+    }
+}
+
 // MARK: - Directory Models
 
 struct DirectoryPerson: Identifiable {
@@ -1119,6 +1728,22 @@ func fetchDirectoryPage1(queryItems: [URLQueryItem]) async -> ([DirectoryPerson]
         return ([], csrf)
     }
     return (entries.array().compactMap { parseDirectoryEntry($0) }, csrf)
+}
+
+/// Runs a live directory search for a club officer by name and returns a freshly-signed
+/// `photoURL` valid at the moment of the call. Officer photo URLs stored in Firestore are
+/// signed with a baked-in expiration and 403 once that passes, so display code should always
+/// call this instead of using `ClubOfficer.photoURL` directly.
+func lookupFreshPhotoURL(name: String, email: String) async -> String? {
+    let parts = name.trimmingCharacters(in: .whitespaces).components(separatedBy: " ")
+    let first = parts.first ?? ""
+    let last = parts.count > 1 ? parts.dropFirst().joined(separator: " ") : ""
+    var queryItems: [URLQueryItem] = []
+    if !first.isEmpty { queryItems.append(URLQueryItem(name: "directory_entry[first_name]", value: first)) }
+    if !last.isEmpty { queryItems.append(URLQueryItem(name: "directory_entry[last_name]", value: last)) }
+    let (results, _) = await fetchDirectoryPage1(queryItems: queryItems)
+    // Disambiguate by email in case of a name collision among search results.
+    return results.first(where: { $0.studentEmail == email })?.photoURL ?? results.first?.photoURL
 }
 
 func fetchDirectoryPageN(page: Int, queryItems: [URLQueryItem], csrfToken: String) async -> [DirectoryPerson] {
@@ -1560,7 +2185,7 @@ func decodedImage(from data: Data) -> Image? {
     #endif
 }
 
-private class ImageDataCache {
+class ImageDataCache {
     static let shared = ImageDataCache()
     private let cache = NSCache<NSString, NSData>()
     func data(for url: String) -> Data? { cache.object(forKey: url as NSString) as Data? }

@@ -74,6 +74,7 @@ struct ContentView: View {
                 VeracrossGradesView()
                     .onAppear { appInfo.preloadAll() }
             }
+            .badge(appInfo.totalUnreadAssignments)
             Tab("Calendar", systemImage: "calendar", value: "Calendar") {
                 CalendarView()
             }
@@ -86,6 +87,7 @@ struct ContentView: View {
             Tab("Clubs", systemImage: "person.3", value: "Clubs") {
                 ClubsView()
             }
+            .badge(appInfo.clubsWithUnreadAnnouncements.count)
             Tab("Quick Links", systemImage: "link", value: "Quick Links") {
                 QuickLinks()
             }

@@ -21,7 +21,7 @@ const logger = require("firebase-functions/logger");
 // functions should each use functions.runWith({ maxInstances: 10 }) instead.
 // In the v1 API, each function can only serve one request per container, so
 // this will be the maximum concurrent request count.
-setGlobalOptions({ maxInstances: 10 });
+setGlobalOptions({maxInstances: 10});
 
 // Create and deploy your first functions
 // https://firebase.google.com/docs/functions/get-started
@@ -30,3 +30,43 @@ setGlobalOptions({ maxInstances: 10 });
 //   logger.info("Hello logs!", {structuredData: true});
 //   response.send("Hello from Firebase!");
 // });
+
+// Proxies ICS calendar fetches to Veracross so advisor-portal (served from
+// Firebase Hosting) can pull schedule data without hitting browser CORS —
+// Veracross's server does not send Access-Control-Allow-Origin for our
+// origin, and that isn't something client-side JS can work around. Since
+// this fetch happens server-to-server, CORS does not apply here at all.
+const ALLOWED_HOSTNAMES = new Set(["api.veracross.com"]);
+
+exports.icsProxy = onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+
+  const target = req.query.url;
+  if (!target) {
+    res.status(400).send("Missing url parameter");
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch (err) {
+    res.status(400).send("Invalid url");
+    return;
+  }
+
+  if (!ALLOWED_HOSTNAMES.has(parsed.hostname)) {
+    res.status(403).send("Host not allowed");
+    return;
+  }
+
+  try {
+    const upstream = await fetch(parsed.toString());
+    const text = await upstream.text();
+    res.set("Content-Type", "text/calendar");
+    res.status(upstream.status).send(text);
+  } catch (err) {
+    logger.error("icsProxy upstream fetch failed", err);
+    res.status(502).send(`Upstream fetch failed: ${err.message}`);
+  }
+});

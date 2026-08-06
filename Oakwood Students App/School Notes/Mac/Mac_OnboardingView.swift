@@ -1,15 +1,21 @@
 //
-//  OnboardingView.swift
+//  Mac_OnboardingView.swift
 //  School Notes
 //
-//  Created by Luke Titi on 3/26/26.
+//  Created by Luke Titi on 8/4/26.
 //
+//  macOS equivalent of OnboardingView.swift's step-based onboarding flow.
+//  Reuses `onboardingFeatures` and the `Color.oakwoodGreen`/`oakwoodGreenLight`
+//  extension declared (non-privately) in OnboardingView.swift rather than
+//  duplicating that data. Notifications and Veracross remain skippable; Google
+//  sign-in is mandatory, matching the iOS behavior fixed alongside this file.
 
 import SwiftUI
+import UserNotifications
 
-// MARK: - Reusable Onboarding Components
+// MARK: - Reusable Mac Onboarding Components
 
-private struct OnboardingIconCircle: View {
+private struct Mac_OnboardingIconCircle: View {
     let icon: String
     let style: IconStyle
 
@@ -30,23 +36,23 @@ private struct OnboardingIconCircle: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 130, height: 130)
+                    .frame(width: 110, height: 110)
                 Image(systemName: icon)
-                    .font(.system(size: 56))
+                    .font(.system(size: 46))
                     .foregroundStyle(.white)
             case .tinted(let color):
                 Circle()
                     .fill(color.opacity(0.15))
-                    .frame(width: 130, height: 130)
+                    .frame(width: 110, height: 110)
                 Image(systemName: icon)
-                    .font(.system(size: 56))
+                    .font(.system(size: 46))
                     .foregroundStyle(color)
             }
         }
     }
 }
 
-private struct OnboardingPrimaryButton: View {
+private struct Mac_OnboardingPrimaryButton: View {
     let label: String
     let icon: String?
     let style: ButtonStyle
@@ -73,11 +79,12 @@ private struct OnboardingPrimaryButton: View {
             }
             .font(.headline)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
             .background(backgroundView)
             .foregroundStyle(foregroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -99,14 +106,14 @@ private struct OnboardingPrimaryButton: View {
     private var foregroundColor: Color {
         switch style {
         case .primaryColor:
-            return Color(.systemBackground)
+            return Color(nsColor: .windowBackgroundColor)
         default:
             return .white
         }
     }
 }
 
-private struct OnboardingSkipButton: View {
+private struct Mac_OnboardingSkipButton: View {
     let action: () -> Void
 
     var body: some View {
@@ -115,13 +122,14 @@ private struct OnboardingSkipButton: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+        .buttonStyle(.plain)
         .padding(.vertical, 2)
     }
 }
 
-// MARK: - Main Onboarding Container
+// MARK: - Main Mac Onboarding Container
 
-struct OnboardingView: View {
+struct Mac_OnboardingView: View {
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var step = 0
@@ -132,39 +140,36 @@ struct OnboardingView: View {
         Group {
             switch step {
             case 0:
-                WelcomeOnboardingPage(onNext: advance)
+                Mac_WelcomeOnboardingPage(onNext: advance)
             case 1...4:
-                FeatureOnboardingPage(
+                Mac_FeatureOnboardingPage(
                     feature: onboardingFeatures[step - 1],
                     stepIndex: step - 1,
                     totalFeatures: onboardingFeatures.count,
                     onNext: advance,
-                    onSkipToSetup: { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { step = 5 } }
+                    onSkipToSetup: { withAnimation { step = 5 } }
                 )
             case 5:
-                NotificationsOnboardingPage(onComplete: advance, onSkip: advance)
+                Mac_NotificationsOnboardingPage(onComplete: advance, onSkip: advance)
             case 6:
-                VeracrossOnboardingPage(onComplete: advance, onSkip: advance)
+                Mac_VeracrossOnboardingPage(onComplete: advance, onSkip: advance)
             case 7:
-                GoogleOnboardingPage(onComplete: advance)
+                Mac_GoogleOnboardingPage(onComplete: advance)
             default:
-                CompleteOnboardingPage {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                Mac_CompleteOnboardingPage {
+                    withAnimation {
                         hasCompletedOnboarding = true
                     }
                 }
             }
         }
         .id(step)
-        .transition(.asymmetric(
-            insertion: .move(edge: .trailing).combined(with: .opacity),
-            removal: .move(edge: .leading).combined(with: .opacity)
-        ))
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: step)
+        .animation(.easeInOut(duration: 0.25), value: step)
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 600, idealHeight: 680)
     }
 
     private func advance() {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+        withAnimation(.easeInOut(duration: 0.25)) {
             step += 1
         }
     }
@@ -172,17 +177,17 @@ struct OnboardingView: View {
 
 // MARK: - Welcome Page
 
-struct WelcomeOnboardingPage: View {
+struct Mac_WelcomeOnboardingPage: View {
     let onNext: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
-                OnboardingIconCircle(icon: "graduationcap.fill", style: .gradient)
+            VStack(spacing: 24) {
+                Mac_OnboardingIconCircle(icon: "graduationcap.fill", style: .gradient)
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Text("Oakwood Students")
                         .font(.largeTitle.bold())
                     Text("The all new Oakwood app")
@@ -195,16 +200,16 @@ struct WelcomeOnboardingPage: View {
 
             Spacer()
 
-            OnboardingPrimaryButton("Get Started", style: .gradient, action: onNext)
-                .padding(.horizontal, 32)
-                .padding(.bottom, 52)
+            Mac_OnboardingPrimaryButton("Get Started", style: .gradient, action: onNext)
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
         }
     }
 }
 
 // MARK: - Feature Slide Page
 
-struct FeatureOnboardingPage: View {
+struct Mac_FeatureOnboardingPage: View {
     let feature: OnboardingFeature
     let stepIndex: Int
     let totalFeatures: Int
@@ -217,10 +222,10 @@ struct FeatureOnboardingPage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
-                OnboardingIconCircle(icon: feature.icon, style: .tinted(feature.color))
+            VStack(spacing: 24) {
+                Mac_OnboardingIconCircle(icon: feature.icon, style: .tinted(feature.color))
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Text(feature.title)
                         .font(.largeTitle.bold())
                     Text(feature.description)
@@ -240,30 +245,31 @@ struct FeatureOnboardingPage: View {
                     Capsule()
                         .fill(i == stepIndex ? Color.primary : Color.secondary.opacity(0.25))
                         .frame(width: i == stepIndex ? 20 : 7, height: 7)
-                        .animation(.spring(response: 0.3), value: stepIndex)
+                        .animation(.easeInOut(duration: 0.2), value: stepIndex)
                 }
             }
-            .padding(.bottom, 32)
+            .padding(.bottom, 28)
 
-            VStack(spacing: 14) {
-                OnboardingPrimaryButton(isLastFeature ? "Get Started" : "Next", action: onNext)
+            VStack(spacing: 12) {
+                Mac_OnboardingPrimaryButton(isLastFeature ? "Get Started" : "Next", action: onNext)
 
                 Button(action: onSkipToSetup) {
                     Text("Skip Intro")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
                 .padding(.vertical, 2)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 52)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
     }
 }
 
 // MARK: - Notifications Permission Page
 
-struct NotificationsOnboardingPage: View {
+struct Mac_NotificationsOnboardingPage: View {
     let onComplete: () -> Void
     let onSkip: () -> Void
     @State private var requested = false
@@ -272,10 +278,10 @@ struct NotificationsOnboardingPage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
-                OnboardingIconCircle(icon: "bell.badge.fill", style: .tinted(.oakwoodGreen))
+            VStack(spacing: 24) {
+                Mac_OnboardingIconCircle(icon: "bell.badge.fill", style: .tinted(.oakwoodGreen))
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Text("Stay in the Loop")
                         .font(.largeTitle.bold())
                     Text("Get notified when your grades are updated so you're never caught off guard.")
@@ -289,27 +295,31 @@ struct NotificationsOnboardingPage: View {
 
             Spacer()
 
-            VStack(spacing: 14) {
-                OnboardingPrimaryButton("Enable Notifications", icon: "bell.fill", style: .solid(.oakwoodGreen)) {
+            VStack(spacing: 12) {
+                Mac_OnboardingPrimaryButton("Enable Notifications", icon: "bell.fill", style: .solid(.oakwoodGreen)) {
                     requested = true
-                    GradeNotificationService.shared.requestNotificationPermission()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        onComplete()
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                        if let error {
+                            print("Notification permission error: \(error)")
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            onComplete()
+                        }
                     }
                 }
                 .disabled(requested)
 
-                OnboardingSkipButton(action: onSkip)
+                Mac_OnboardingSkipButton(action: onSkip)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 52)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
     }
 }
 
 // MARK: - Veracross Login Page
 
-struct VeracrossOnboardingPage: View {
+struct Mac_VeracrossOnboardingPage: View {
     let onComplete: () -> Void
     let onSkip: () -> Void
     @EnvironmentObject var appInfo: AppInfo
@@ -317,18 +327,18 @@ struct VeracrossOnboardingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 ZStack {
                     Circle()
                         .fill(Color.green.opacity(0.15))
-                        .frame(width: 100, height: 100)
+                        .frame(width: 84, height: 84)
                     Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        .font(.system(size: 42))
+                        .font(.system(size: 36))
                         .foregroundStyle(.green)
                 }
-                .padding(.top, 64)
+                .padding(.top, 44)
 
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Text("Connect Veracross")
                         .font(.title.bold())
                     Text("Sign in to load your grades and assignments.")
@@ -353,33 +363,33 @@ struct VeracrossOnboardingPage: View {
                 )
                 .frame(maxWidth: .infinity)
                 .frame(maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal, 16)
-                .padding(.top, 24)
+                .padding(.top, 20)
             } else {
                 Spacer()
             }
 
             Spacer()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 if !showingWebView {
-                    OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
+                    Mac_OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
                         withAnimation { showingWebView = true }
                     }
                 }
 
-                OnboardingSkipButton(action: onSkip)
+                Mac_OnboardingSkipButton(action: onSkip)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 52)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
     }
 }
 
 // MARK: - Google Sign-In Page
 
-struct GoogleOnboardingPage: View {
+struct Mac_GoogleOnboardingPage: View {
     let onComplete: () -> Void
     @EnvironmentObject var appInfo: AppInfo
     // Local state bridged from googleVM so the view re-renders when sign-in completes
@@ -391,10 +401,10 @@ struct GoogleOnboardingPage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
-                OnboardingIconCircle(icon: "person.circle.fill", style: .tinted(.oakwoodGreen))
+            VStack(spacing: 24) {
+                Mac_OnboardingIconCircle(icon: "person.circle.fill", style: .tinted(.oakwoodGreen))
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Text("Sign In with Google")
                         .font(.largeTitle.bold())
                     Text("Use your Oakwood Google account to sign up for sports events and report scores.")
@@ -408,7 +418,7 @@ struct GoogleOnboardingPage: View {
 
             Spacer()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 if isSignedIn {
                     HStack(spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
@@ -424,18 +434,19 @@ struct GoogleOnboardingPage: View {
                         Spacer()
                     }
                     .padding()
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                    OnboardingPrimaryButton("Continue", style: .solid(.oakwoodGreen), action: onComplete)
+                    Mac_OnboardingPrimaryButton("Continue", style: .solid(.oakwoodGreen), action: onComplete)
                 } else {
-                    OnboardingPrimaryButton("Sign In with Google", icon: "person.badge.plus", style: .solid(.oakwoodGreen)) {
+                    Mac_OnboardingPrimaryButton("Sign In with Google", icon: "person.badge.plus", style: .solid(.oakwoodGreen)) {
                         appInfo.googleVM.signIn()
                     }
+                    // Mandatory — no skip option, matching the iOS onboarding fix.
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 52)
+            .padding(.horizontal, 40)
+            .padding(.bottom, 40)
         }
         .onReceive(appInfo.googleVM.$isSignedIn) { value in
             isSignedIn = value
@@ -452,14 +463,14 @@ struct GoogleOnboardingPage: View {
 
 // MARK: - Complete Page
 
-struct CompleteOnboardingPage: View {
+struct Mac_CompleteOnboardingPage: View {
     let onDone: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
+            VStack(spacing: 24) {
                 ZStack {
                     Circle()
                         .fill(
@@ -469,13 +480,13 @@ struct CompleteOnboardingPage: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 130, height: 130)
+                        .frame(width: 110, height: 110)
                     Image(systemName: "checkmark")
-                        .font(.system(size: 56, weight: .bold))
+                        .font(.system(size: 46, weight: .bold))
                         .foregroundStyle(.white)
                 }
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Text("You're all set!")
                         .font(.largeTitle.bold())
                     Text("Welcome to Oakwood Students. Dive in and explore.")
@@ -489,9 +500,9 @@ struct CompleteOnboardingPage: View {
 
             Spacer()
 
-            OnboardingPrimaryButton("Get Started", style: .gradient, action: onDone)
-                .padding(.horizontal, 32)
-                .padding(.bottom, 52)
+            Mac_OnboardingPrimaryButton("Get Started", style: .gradient, action: onDone)
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
         }
     }
 }

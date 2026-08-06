@@ -8,6 +8,18 @@
 import Foundation
 import FirebaseFirestore
 
+// Advisor roster — update as advisors change
+let advisorList: [String] = ["Mr. Hubbard", "Mrs. Call", "Mr. Willis", "Dr. Pak", "Mr. Clink"]
+
+// Schoolwide Learner Objective categories (from the paper Service Learning Program form, page 2) —
+// multi-select, a single service can reasonably touch more than one.
+let slOptions: [String] = [
+    "Critical Thinkers",
+    "Effective Communicators",
+    "Community Contributors",
+    "Authentic and Resilient Individuals"
+]
+
 // MARK: - FirebaseService (Handles all Firestore operations)
 class FirebaseService {
     static let shared = FirebaseService()
@@ -17,7 +29,7 @@ class FirebaseService {
     // MARK: - Service Hours Forms
 
     @discardableResult
-    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, personPK: Int?, supervisorName: String, supervisorEmail: String) async throws -> String {
+    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, personPK: Int?, supervisorName: String, supervisorEmail: String, advisorName: String) async throws -> String {
         var data: [String: Any] = [
             "studentId": studentId,
             "studentName": studentName,
@@ -25,6 +37,7 @@ class FirebaseService {
             "status": "pending_signature",
             "submittedAt": Timestamp(date: form.dateCreated),
             "totalHours": form.services.reduce(0) { $0 + $1.hours },
+            "slos": form.slos,
             "reflection1": form.reflection1,
             "reflection2": form.reflection2,
             "reflection3": form.reflection3,
@@ -32,6 +45,7 @@ class FirebaseService {
             "organization": form.organization ?? "",
             "supervisorName": supervisorName,
             "supervisorEmail": supervisorEmail,
+            "advisorName": advisorName,
             "supervisorSignature": "",
             "services": form.services.map { [
                 "date": $0.date,
@@ -43,6 +57,38 @@ class FirebaseService {
         if let personPK { data["personPK"] = personPK }
         let ref = try await db.collection("serviceForms").addDocument(data: data)
         return ref.documentID
+    }
+
+    /// Resubmits a rejected form in place: same document, edited fields, restarted signing cycle.
+    /// Resets status back to "pending_signature" and clears rejection/signature state so the
+    /// supervisor re-verifies whatever the student fixed rather than skipping straight to approval.
+    func resubmitServiceForm(formId: String, form: ServiceForm, supervisorName: String, supervisorEmail: String, advisorName: String) async throws {
+        let data: [String: Any] = [
+            "title": form.title,
+            "totalHours": form.services.reduce(0) { $0 + $1.hours },
+            "slos": form.slos,
+            "reflection1": form.reflection1,
+            "reflection2": form.reflection2,
+            "reflection3": form.reflection3,
+            "taxID": form.taxID ?? "",
+            "organization": form.organization ?? "",
+            "supervisorName": supervisorName,
+            "supervisorEmail": supervisorEmail,
+            "advisorName": advisorName,
+            "status": "pending_signature",
+            "rejectionReason": "",
+            "supervisorSignature": "",
+            "signerEmail": "",
+            "signatureImage": FieldValue.delete(),
+            "signedAt": FieldValue.delete(),
+            "services": form.services.map { [
+                "date": $0.date,
+                "notes": $0.notes,
+                "hours": $0.hours,
+                "description": $0.description
+            ]}
+        ]
+        try await db.collection("serviceForms").document(formId).setData(data, merge: true)
     }
 
     func submitFormToAdvisor(formId: String) async throws {
@@ -66,7 +112,8 @@ class FirebaseService {
         let data = doc.data()
         let services = (data["services"] as? [[String: Any]] ?? []).map { s in
             LocalService(date: s["date"] as? String ?? "", description: s["description"] as? String ?? "",
-                         notes: s["notes"] as? String ?? "", hours: s["hours"] as? Double ?? 0)
+                         notes: s["notes"] as? String ?? "", hours: s["hours"] as? Double ?? 0,
+                         veracrossRecordId: s["veracrossRecordId"] as? Int)
         }
         return SubmittedForm(
             id: doc.documentID,
@@ -75,6 +122,7 @@ class FirebaseService {
             status: data["status"] as? String ?? "pending_signature",
             submittedAt: (data["submittedAt"] as? Timestamp)?.dateValue() ?? Date(),
             totalHours: data["totalHours"] as? Double ?? 0,
+            slos: data["slos"] as? [String] ?? [],
             reflection1: data["reflection1"] as? String ?? "",
             reflection2: data["reflection2"] as? String ?? "",
             reflection3: data["reflection3"] as? String ?? "",
@@ -83,6 +131,7 @@ class FirebaseService {
             services: services,
             supervisorName: data["supervisorName"] as? String ?? "",
             supervisorEmail: data["supervisorEmail"] as? String ?? "",
+            advisorName: data["advisorName"] as? String ?? "",
             supervisorSignature: data["supervisorSignature"] as? String ?? "",
             signerEmail: data["signerEmail"] as? String ?? "",
             signatureImageBase64: data["signatureImage"] as? String,
@@ -111,6 +160,7 @@ struct SubmittedForm: Identifiable {
     var status: String  // "pending_signature" | "signed" | "pending" | "approved" | "rejected"
     var submittedAt: Date
     var totalHours: Double
+    var slos: [String] = []
     var reflection1: String
     var reflection2: String
     var reflection3: String
@@ -119,6 +169,7 @@ struct SubmittedForm: Identifiable {
     var services: [LocalService]
     var supervisorName: String
     var supervisorEmail: String
+    var advisorName: String = ""
     var supervisorSignature: String
     var signerEmail: String  // email the signer typed in on the sign page — compare against supervisorEmail
     var signatureImageBase64: String?
@@ -457,6 +508,7 @@ struct Service: Identifiable {
     var notes: String
     var hours: Double
     var schoolYear: String
+    var veracrossId: Int? = nil
 }
 
 struct LocalService: Identifiable, Codable {
@@ -465,6 +517,7 @@ struct LocalService: Identifiable, Codable {
     var description: String
     var notes: String
     var hours: Double
+    var veracrossRecordId: Int? = nil
 }
 
 struct ServiceForm: Identifiable, Codable {
@@ -472,6 +525,7 @@ struct ServiceForm: Identifiable, Codable {
     var title: String
     var dateCreated: Date
     var services: [LocalService]
+    var slos: [String] = []
     var reflection1: String
     var reflection2: String
     var reflection3: String

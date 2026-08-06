@@ -474,27 +474,24 @@ private struct Mac_CalendarFilterView: View {
     @Binding var selectedCategories: Set<String>
     @Environment(\.dismiss) private var dismiss
 
+    private var schoolCalendarCategoryNames: Set<String> {
+        Set(schoolEventCalendars.map(\.category))
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     Button("Show All") { selectedCategories.removeAll() }
                 }
-                Section("Filter Events") {
-                    ForEach(allCategories, id: \.self) { category in
-                        Button {
-                            if selectedCategories.contains(category) { selectedCategories.remove(category) }
-                            else { selectedCategories.insert(category) }
-                        } label: {
-                            HStack {
-                                Text(category).foregroundStyle(.primary)
-                                Spacer()
-                                if selectedCategories.contains(category) {
-                                    Image(systemName: "checkmark").foregroundStyle(.blue)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
+                Section("School Calendars") {
+                    ForEach(allCategories.filter { schoolCalendarCategoryNames.contains($0) }, id: \.self) { category in
+                        filterRow(for: category)
+                    }
+                }
+                Section("Sports Teams") {
+                    ForEach(allCategories.filter { !schoolCalendarCategoryNames.contains($0) }, id: \.self) { category in
+                        filterRow(for: category)
                     }
                 }
             }
@@ -503,6 +500,34 @@ private struct Mac_CalendarFilterView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
+    }
+
+    private func isSelected(_ category: String) -> Bool {
+        selectedCategories.isEmpty || selectedCategories.contains(category)
+    }
+
+    @ViewBuilder
+    private func filterRow(for category: String) -> some View {
+        Button {
+            if selectedCategories.isEmpty {
+                // Currently showing everything (implicit) — tapping one unchecks just that one,
+                // making every other category explicitly selected.
+                selectedCategories = Set(allCategories).subtracting([category])
+            } else if selectedCategories.contains(category) {
+                selectedCategories.remove(category)
+            } else {
+                selectedCategories.insert(category)
+            }
+        } label: {
+            HStack {
+                Text(category).foregroundStyle(.primary)
+                Spacer()
+                if isSelected(category) {
+                    Image(systemName: "checkmark").foregroundStyle(.blue)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -184,17 +184,31 @@ struct HomeView: View {
                     ForEach(viewModel.items) { item in
                         NavigationLink(destination: EventView(events: item)) {
                             VStack(alignment: .leading, spacing: 0) {
-                                CachedAsyncImage(url: URL(string: item.image)) { image in
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
-                                } placeholder: {
-                                    Rectangle()
-                                        .fill(Color.secondary.opacity(0.2))
-                                        .overlay(ProgressView())
+                                ZStack(alignment: .topLeading) {
+                                    CachedAsyncImage(url: URL(string: item.image)) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    } placeholder: {
+                                        Rectangle()
+                                            .fill(Color.secondary.opacity(0.2))
+                                            .overlay(ProgressView())
+                                    }
+                                    .frame(height: 160)
+                                    .clipped()
+
+                                    if hasTodayDate(in: item.title) {
+                                        Text("Happening Today")
+                                            .font(.caption2)
+                                            .fontWeight(.semibold)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(.green.opacity(0.85))
+                                            .foregroundColor(.white)
+                                            .clipShape(Capsule())
+                                            .padding(8)
+                                    }
                                 }
-                                .frame(height: 160)
-                                .clipped()
 
                                 Text(item.title)
                                     .font(.headline)

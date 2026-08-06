@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>Oakwood Advisor Bridge</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; width: 380px; padding: 14px; color: #1c1c1e; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; width: 380px; padding: 14px; color: #1c1c1e; overflow-x: hidden; box-sizing: border-box; }
     h1 { font-size: 14px; margin-bottom: 10px; }
     button { width: 100%; padding: 10px; font-size: 14px; font-weight: 600; background: #007aff; color: white; border: none; border-radius: 8px; cursor: pointer; }
     button:disabled { opacity: 0.5; cursor: default; }
@@ -12,9 +12,28 @@
     #status.error { color: #ff3b30; }
     #status.ok { color: #1a7f37; }
     pre { max-height: 320px; overflow: auto; background: #f2f2f7; border-radius: 8px; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+    hr { border: none; border-top: 1px solid #d1d1d6; margin: 16px 0; }
+    .pending-item { border: 1px solid #d1d1d6; border-radius: 8px; padding: 10px; margin-bottom: 8px; overflow: hidden; box-sizing: border-box; }
+    .pending-item .meta { font-size: 12px; color: #636366; margin-bottom: 6px; white-space: pre-wrap; }
+    .pending-item button { background: #34c759; margin-top: 6px; }
+    .pending-item .warn { color: #ff9500; font-size: 11px; }
+    .pending-item .reject-btn { background: #ff3b30; margin-top: 6px; }
+    .pending-item .more-info-btn { background: #8e8e93; margin-top: 6px; }
+    .pending-item-detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid #d1d1d6; font-size: 12px; color: #1c1c1e; overflow-wrap: anywhere; word-break: break-word; box-sizing: border-box; }
+    .pending-item-detail .detail-section-title { font-weight: 600; margin-top: 6px; margin-bottom: 2px; }
+    .pending-item-detail .service-entry { margin: 2px 0; overflow-wrap: anywhere; word-break: break-word; }
+    .pending-item-detail .signature-img { max-width: 100%; max-height: 80px; display: block; margin: 6px 0; border: 1px solid #d1d1d6; border-radius: 4px; background: #fff; }
+    #advisorSelectContainer input, #advisorSelectContainer select { width: 100%; padding: 8px; font-size: 13px; border: 1px solid #d1d1d6; border-radius: 8px; box-sizing: border-box; }
   </style>
 </head>
 <body>
+  <h1>Pending Approvals</h1>
+  <div id="advisorSelectContainer" style="margin-bottom: 8px;"></div>
+  <button id="loadPendingBtn">Load Pending Approvals</button>
+  <div id="pendingList"></div>
+
+  <hr>
+
   <h1>Pull Volunteer Hours — PK 39950 (test)</h1>
   <button id="pullBtn">Pull from Veracross</button>
   <button id="updateBtn" style="margin-top: 8px; background: #ff9500;">Test Update (record 11261)</button>

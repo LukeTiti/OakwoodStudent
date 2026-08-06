@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Oakwood Advisor – Veracross Bridge",
-  "version": "0.9.0",
-  "description": "v0.9: read + test update + test create + value-list lookup, hardcoded to one student PK. Injects requests directly into the Veracross tab on click so they run in the page's real origin.",
+  "version": "0.10.0",
+  "description": "v0.10: pulls real pending serviceForms submissions from Firestore and posts them to Veracross via the advisor's own tab session.",
   "action": {
     "default_popup": "popup.html"
   },
@@ -11,6 +11,7 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://axiom.veracross.com/*"
+    "https://axiom.veracross.com/*",
+    "https://firestore.googleapis.com/*"
   ]
 }

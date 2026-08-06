@@ -14,49 +14,68 @@ struct Mac_ClubsView: View {
 
     private var userEmail: String { appInfo.googleVM.userEmail }
     private var isSuperAdmin: Bool { userEmail.lowercased() == superAdminEmail }
+    // Followed clubs sort to the top; each group keeps alphabetical order.
+    private var sortedClubs: [Club] {
+        clubs.sorted {
+            (appInfo.followedClubIDs.contains($0.id) ? 0 : 1, $0.name) < (appInfo.followedClubIDs.contains($1.id) ? 0 : 1, $1.name)
+        }
+    }
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Loading clubs…").frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if clubs.isEmpty {
-                ContentUnavailableView("No Clubs Yet", systemImage: "person.3")
-            } else {
-                List(clubs) { club in
-                    NavigationLink {
-                        Mac_ClubDetailView(
-                            club: club,
-                            onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
-                            onDelete: { clubs.removeAll { $0.id == club.id } }
-                        )
-                    } label: {
-                        HStack(spacing: 12) {
-                            ClubSwatchView(club: club)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(club.name).font(.body.weight(.semibold))
-                                let s = club.meetingScheduleDisplay
-                                if !s.isEmpty { Text(s).font(.caption).foregroundStyle(.secondary) }
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading clubs…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if clubs.isEmpty {
+                    ContentUnavailableView("No Clubs Yet", systemImage: "person.3")
+                } else {
+                    List(sortedClubs) { club in
+                        NavigationLink {
+                            Mac_ClubDetailView(
+                                club: club,
+                                onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
+                                onDelete: { clubs.removeAll { $0.id == club.id } }
+                            )
+                        } label: {
+                            HStack(spacing: 12) {
+                                ClubSwatchView(club: club)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(club.name).font(.body.weight(.semibold))
+                                    let s = club.meetingScheduleDisplay
+                                    if !s.isEmpty { Text(s).font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                if appInfo.followedClubIDs.contains(club.id) {
+                                    Image(systemName: "bell.fill").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if appInfo.clubsWithUnreadAnnouncements.contains(club.id) {
+                                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                                }
                             }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
-        }
-        .navigationTitle("Clubs")
-        .toolbar {
-            if isSuperAdmin {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { showCreate = true } label: { Image(systemName: "plus") }
+            .navigationTitle("Clubs")
+            .toolbar {
+                if isSuperAdmin {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { showCreate = true } label: { Image(systemName: "plus") }
+                    }
                 }
             }
+            .alert("New Club", isPresented: $showCreate) {
+                TextField("Club name", text: $newClubName)
+                Button("Create") { Task { await createClub() } }
+                Button("Cancel", role: .cancel) { newClubName = "" }
+            }
+            .onAppear {
+                Task { await loadClubs() }
+                Task { await appInfo.refreshUnreadClubBadges() }
+                Task { await scheduleFollowedClubEventReminders() }
+            }
         }
-        .alert("New Club", isPresented: $showCreate) {
-            TextField("Club name", text: $newClubName)
-            Button("Create") { Task { await createClub() } }
-            Button("Cancel", role: .cancel) { newClubName = "" }
-        }
-        .onAppear { Task { await loadClubs() } }
     }
 
     private func loadClubs() async {
@@ -101,86 +120,120 @@ struct Mac_ClubDetailView: View {
     private var themeGradient: LinearGradient? { ClubTheme.preset(id: club.themeID)?.gradient }
 
     var body: some View {
-        List {
-            if club.hasCustomBackground {
-                ClubCloudImage(clubId: club.id, version: club.backgroundVersion)
-                    .frame(maxWidth: .infinity)
-                    .listRowInsets(EdgeInsets())
-            }
-            if !club.description.isEmpty || !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
-                Section {
-                    if !club.description.isEmpty { Text(club.description).font(.subheadline).foregroundStyle(.secondary) }
-                    let s = club.meetingScheduleDisplay
-                    if !s.isEmpty { Label(s, systemImage: "clock").font(.subheadline) }
-                    if !club.meetingLocation.isEmpty { Label(club.meetingLocation, systemImage: "mappin.circle").font(.subheadline) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if club.hasCustomBackground {
+                    ClubCloudImage(clubId: club.id, version: club.backgroundVersion)
+                        .frame(maxWidth: .infinity, maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-            }
 
-            if !club.officers.isEmpty {
-                Section("Officers") {
-                    ForEach(club.officers) { o in
-                        HStack(spacing: 12) {
-                            Mac_DirectoryPhoto(urlString: o.photoURL, size: 44, isReady: cookiesReady)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(o.name).font(.body)
-                                Text(o.role).font(.caption).foregroundStyle(.secondary)
-                                if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.secondary) }
-                            }
-                            Spacer()
-                            if !o.email.isEmpty {
-                                Button { openExternalURL("mailto:\(o.email)") } label: {
-                                    Image(systemName: "envelope").foregroundStyle(.blue)
-                                }.buttonStyle(.plain)
-                            }
-                        }.padding(.vertical, 4)
+                // About
+                if !club.description.isEmpty {
+                    cardSection {
+                        Text(club.description)
+                            .font(.body)
+                            .foregroundStyle(.white)
                     }
                 }
-            }
 
-            Section {
-                if isLoadingAnnouncements { HStack { Spacer(); ProgressView(); Spacer() } }
-                else if announcements.isEmpty { Text("No announcements").foregroundStyle(.secondary).font(.subheadline) }
-                else {
-                    ForEach(announcements) { ann in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(ann.title).font(.body.weight(.semibold))
-                            if !ann.message.isEmpty { Text(ann.message).font(.subheadline).foregroundStyle(.secondary) }
-                            HStack {
-                                Text(ann.authorName).font(.caption2).foregroundStyle(.secondary)
+                // Info
+                if !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
+                    cardSection {
+                        let s = club.meetingScheduleDisplay
+                        if !s.isEmpty { Label(s, systemImage: "clock").font(.subheadline).foregroundStyle(.white) }
+                        if !s.isEmpty && !club.meetingLocation.isEmpty { cardDivider }
+                        if !club.meetingLocation.isEmpty { Label(club.meetingLocation, systemImage: "mappin.circle").font(.subheadline).foregroundStyle(.white) }
+                    }
+                }
+
+                if !club.officers.isEmpty {
+                    sectionHeader("Officers")
+                    cardSection {
+                        ForEach(Array(club.officers.enumerated()), id: \.element.id) { index, o in
+                            if index > 0 { cardDivider }
+                            HStack(spacing: 12) {
+                                Mac_OfficerPhoto(officer: o, size: 44, isReady: cookiesReady)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(o.name).font(.body).foregroundStyle(.white)
+                                    Text(o.role).font(.caption).foregroundStyle(.white.opacity(0.65))
+                                    if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.white.opacity(0.65)) }
+                                }
                                 Spacer()
-                                Text(ann.postedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
-                            }
+                                if !o.email.isEmpty {
+                                    Button { openExternalURL("mailto:\(o.email)") } label: {
+                                        Image(systemName: "envelope").foregroundStyle(.blue)
+                                    }.buttonStyle(.plain)
+                                }
+                            }.padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
-                        .swipeActions { if canEdit { deleteAnnouncementButton(ann) } }
                     }
                 }
-                if canEdit { Button { showAddAnnouncement = true } label: { Label("Post Announcement", systemImage: "megaphone") } }
-            } header: { Text("Announcements") }
 
-            Section {
-                if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
-                else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundStyle(.secondary).font(.subheadline) }
-                else {
-                    ForEach(upcomingEvents) { event in
-                        Mac_ClubEventRow(event: event).swipeActions { if canEdit { eventSwipeActions(event) } }
+                sectionHeader("Announcements")
+                cardSection {
+                    if isLoadingAnnouncements { HStack { Spacer(); ProgressView(); Spacer() } }
+                    else if announcements.isEmpty { Text("No announcements").foregroundStyle(.white.opacity(0.65)).font(.subheadline) }
+                    else {
+                        ForEach(Array(announcements.enumerated()), id: \.element.id) { index, ann in
+                            if index > 0 { cardDivider }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(ann.title).font(.body.weight(.semibold)).foregroundStyle(.white)
+                                if !ann.message.isEmpty { Text(ann.message).font(.subheadline).foregroundStyle(.white.opacity(0.65)) }
+                                HStack {
+                                    Text(ann.authorName).font(.caption2).foregroundStyle(.white.opacity(0.65))
+                                    Spacer()
+                                    Text(ann.postedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.white.opacity(0.65))
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            .contextMenu { if canEdit { deleteAnnouncementButton(ann) } }
+                        }
+                    }
+                    if canEdit {
+                        if !announcements.isEmpty || isLoadingAnnouncements { cardDivider }
+                        Button { showAddAnnouncement = true } label: { Label("Post Announcement", systemImage: "megaphone") }
                     }
                 }
-                if canEdit { Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") } }
-            } header: { Text("Upcoming Events") }
 
-            if !pastEvents.isEmpty {
-                Section("Past Events") {
-                    ForEach(pastEvents) { event in
-                        Mac_ClubEventRow(event: event).swipeActions { if canEdit { deleteEventButton(event) } }
+                sectionHeader("Upcoming Events")
+                cardSection {
+                    if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
+                    else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundStyle(.white.opacity(0.65)).font(.subheadline) }
+                    else {
+                        ForEach(Array(upcomingEvents.enumerated()), id: \.element.id) { index, event in
+                            if index > 0 { cardDivider }
+                            Mac_ClubEventRow(event: event)
+                                .contextMenu { if canEdit { eventContextMenuItems(event) } }
+                        }
+                    }
+                    if canEdit {
+                        if !upcomingEvents.isEmpty || isLoadingEvents { cardDivider }
+                        Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") }
+                    }
+                }
+
+                if !pastEvents.isEmpty {
+                    sectionHeader("Past Events")
+                    cardSection {
+                        ForEach(Array(pastEvents.enumerated()), id: \.element.id) { index, event in
+                            if index > 0 { cardDivider }
+                            Mac_ClubEventRow(event: event)
+                                .contextMenu { if canEdit { deleteEventButton(event) } }
+                        }
                     }
                 }
             }
+            .padding(20)
         }
-        .scrollContentBackground(themeGradient == nil ? .automatic : .hidden)
-        .background { themeGradient?.ignoresSafeArea() }
+        .background { (themeGradient ?? LinearGradient(colors: [Color(nsColor: .windowBackgroundColor)], startPoint: .top, endPoint: .bottom)).ignoresSafeArea() }
         .navigationTitle(club.name)
         .toolbar {
+            ToolbarItem {
+                Button { appInfo.toggleFollowingClub(club.id) } label: {
+                    Image(systemName: appInfo.followedClubIDs.contains(club.id) ? "bell.fill" : "bell")
+                }
+            }
             if canEdit {
                 ToolbarItem(placement: .confirmationAction) {
                     Menu {
@@ -204,18 +257,20 @@ struct Mac_ClubDetailView: View {
                 .frame(minWidth: 420, minHeight: 360)
         }
         .sheet(isPresented: $showAddEvent) {
-            Mac_ClubEventFormView(clubId: club.id, event: nil) { await loadEvents() }
+            Mac_ClubEventFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName, event: nil) { await loadEvents() }
                 .frame(minWidth: 420, minHeight: 360)
         }
         .sheet(item: $editingEvent) { event in
-            Mac_ClubEventFormView(clubId: club.id, event: event) { await loadEvents() }
+            Mac_ClubEventFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName, event: event) { await loadEvents() }
                 .frame(minWidth: 420, minHeight: 360)
         }
         .sheet(isPresented: $showAddAnnouncement) {
-            Mac_ClubAnnouncementFormView(clubId: club.id, authorName: appInfo.googleVM.userName) { await loadAnnouncements() }
+            Mac_ClubAnnouncementFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName) { await loadAnnouncements() }
                 .frame(minWidth: 420, minHeight: 300)
         }
         .onAppear {
+            appInfo.markClubViewed(club.id)
+            appInfo.clubsWithUnreadAnnouncements.remove(club.id)
             Task {
                 // Officer photos are Veracross-hosted and need an authenticated session to
                 // load, same as any other Veracross image/document — unlike events/announcements
@@ -232,18 +287,43 @@ struct Mac_ClubDetailView: View {
     @ViewBuilder private func deleteEventButton(_ event: ClubEvent) -> some View {
         Button(role: .destructive) { Task { try? await FirebaseService.shared.deleteClubEvent(clubId: club.id, eventId: event.id); await loadEvents() } } label: { Label("Delete", systemImage: "trash") }
     }
-    @ViewBuilder private func eventSwipeActions(_ event: ClubEvent) -> some View {
+    @ViewBuilder private func eventContextMenuItems(_ event: ClubEvent) -> some View {
+        Button { editingEvent = event } label: { Label("Edit", systemImage: "pencil") }
         deleteEventButton(event)
-        Button { editingEvent = event } label: { Label("Edit", systemImage: "pencil") }.tint(.orange)
     }
     @ViewBuilder private func deleteAnnouncementButton(_ ann: ClubAnnouncement) -> some View {
         Button(role: .destructive) { Task { try? await FirebaseService.shared.deleteClubAnnouncement(clubId: club.id, announcementId: ann.id); await loadAnnouncements() } } label: { Label("Delete", systemImage: "trash") }
+    }
+
+    // MARK: - Card styling (macOS has no built-in grouped-list card look like iOS's
+    // dark-mode insetGrouped rendering, so this replicates it manually: solid near-black
+    // rounded cards with white text, matching what iOS gets for free.)
+
+    @ViewBuilder private func cardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+    }
+
+    private var cardDivider: some View {
+        Divider().overlay(Color.white.opacity(0.15))
     }
 
     private func loadEvents() async {
         isLoadingEvents = true
         events = (try? await FirebaseService.shared.fetchClubEvents(clubId: club.id)) ?? []
         isLoadingEvents = false
+        if appInfo.followedClubIDs.contains(club.id) { scheduleEventReminders(clubName: club.name, events: events) }
     }
     private func loadAnnouncements() async {
         isLoadingAnnouncements = true
@@ -258,10 +338,10 @@ private struct Mac_ClubEventRow: View {
     let event: ClubEvent
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(event.title).font(.body.weight(.semibold))
-            Label(event.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar").font(.caption).foregroundStyle(.secondary)
-            if !event.location.isEmpty { Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundStyle(.secondary) }
-            if !event.description.isEmpty { Text(event.description).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+            Text(event.title).font(.body.weight(.semibold)).foregroundStyle(.white)
+            Label(event.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar").font(.caption).foregroundStyle(.white.opacity(0.65))
+            if !event.location.isEmpty { Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundStyle(.white.opacity(0.65)) }
+            if !event.description.isEmpty { Text(event.description).font(.caption).foregroundStyle(.white.opacity(0.65)).lineLimit(2) }
         }.padding(.vertical, 4)
     }
 }
@@ -278,6 +358,8 @@ private struct Mac_ClubEditView: View {
     @State private var showOfficerPicker = false
     @State private var pendingPerson: DirectoryPerson? = nil
     @State private var roleInput = ""
+    @State private var editingOfficer: ClubOfficer? = nil
+    @State private var editRoleInput = ""
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var isUploadingImage = false
     @State private var uploadError: String? = nil
@@ -335,16 +417,25 @@ private struct Mac_ClubEditView: View {
                     TextField("Location", text: $club.meetingLocation)
                 }
                 Section {
-                    ForEach(club.officers) { o in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(o.name).font(.body)
-                            Text(o.role).font(.caption).foregroundStyle(.secondary)
-                            if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.secondary) }
+                    ForEach(Array(club.officers.enumerated()), id: \.element.id) { index, o in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(o.name).font(.body)
+                                Text(o.role).font(.caption).foregroundStyle(.secondary)
+                                if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            Button { moveOfficer(at: index, by: -1) } label: { Image(systemName: "chevron.up") }
+                                .buttonStyle(.plain).disabled(index == 0)
+                            Button { moveOfficer(at: index, by: 1) } label: { Image(systemName: "chevron.down") }
+                                .buttonStyle(.plain).disabled(index == club.officers.count - 1)
+                            Button { editingOfficer = o; editRoleInput = o.role } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.plain)
+                            Button(role: .destructive) { club.officers.removeAll { $0.id == o.id } } label: { Image(systemName: "trash") }
+                                .buttonStyle(.plain)
                         }
                         .padding(.vertical, 2)
-                        .swipeActions { Button(role: .destructive) { club.officers.removeAll { $0.id == o.id } } label: { Label("Remove", systemImage: "trash") } }
                     }
-                    .onMove { club.officers.move(fromOffsets: $0, toOffset: $1) }
                     Button { showOfficerPicker = true } label: { Label("Add Officer from Directory", systemImage: "person.badge.plus") }
                 } header: {
                     Text("Officers")
@@ -372,6 +463,16 @@ private struct Mac_ClubEditView: View {
                     pendingPerson = nil
                 }
                 Button("Cancel", role: .cancel) { pendingPerson = nil }
+            }
+            .alert("Edit Role", isPresented: Binding(get: { editingOfficer != nil }, set: { if !$0 { editingOfficer = nil } })) {
+                TextField("e.g. President, Secretary", text: $editRoleInput)
+                Button("Save") {
+                    guard let officer = editingOfficer, !editRoleInput.trimmingCharacters(in: .whitespaces).isEmpty,
+                          let idx = club.officers.firstIndex(where: { $0.id == officer.id }) else { return }
+                    club.officers[idx].role = editRoleInput.trimmingCharacters(in: .whitespaces)
+                    editingOfficer = nil
+                }
+                Button("Cancel", role: .cancel) { editingOfficer = nil }
             }
             .onChange(of: selectedPhotoItem) { _, newItem in
                 guard let newItem else { return }
@@ -407,6 +508,12 @@ private struct Mac_ClubEditView: View {
         isSaving = true
         try? await FirebaseService.shared.updateClub(club)
         onSave(club); dismiss()
+    }
+
+    private func moveOfficer(at index: Int, by offset: Int) {
+        let newIndex = index + offset
+        guard club.officers.indices.contains(newIndex) else { return }
+        club.officers.swapAt(index, newIndex)
     }
 }
 
@@ -487,6 +594,8 @@ private struct Mac_ClubDirectoryPickerView: View {
 
 private struct Mac_ClubEventFormView: View {
     let clubId: String
+    let clubName: String
+    let authorName: String
     let event: ClubEvent?
     var onSave: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -519,13 +628,14 @@ private struct Mac_ClubEventFormView: View {
 
     private func save() async {
         isSaving = true
-        try? await FirebaseService.shared.saveClubEvent(clubId: clubId, event: ClubEvent(id: event?.id ?? "", title: title, date: date, location: location, description: desc))
+        try? await FirebaseService.shared.saveClubEvent(clubId: clubId, clubName: clubName, authorName: authorName, event: ClubEvent(id: event?.id ?? "", title: title, date: date, location: location, description: desc))
         await onSave(); dismiss()
     }
 }
 
 private struct Mac_ClubAnnouncementFormView: View {
     let clubId: String
+    let clubName: String
     let authorName: String
     var onSave: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -553,7 +663,7 @@ private struct Mac_ClubAnnouncementFormView: View {
 
     private func save() async {
         isSaving = true
-        try? await FirebaseService.shared.saveClubAnnouncement(clubId: clubId, ann: ClubAnnouncement(id: "", title: title, message: message, postedAt: Date(), authorName: authorName))
+        try? await FirebaseService.shared.saveClubAnnouncement(clubId: clubId, clubName: clubName, ann: ClubAnnouncement(id: "", title: title, message: message, postedAt: Date(), authorName: authorName))
         await onSave(); dismiss()
     }
 }

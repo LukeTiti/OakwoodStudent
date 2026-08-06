@@ -8,6 +8,7 @@ import SwiftUI
 // MARK: - Directory List View
 
 struct DirectoryView: View {
+    @EnvironmentObject var appInfo: AppInfo
     @State private var searchText = ""
     @State private var selectedGrade: String? = nil
     @State private var results: [DirectoryPerson] = []
@@ -99,6 +100,12 @@ struct DirectoryView: View {
         }
         .navigationTitle("")
         .onChange(of: selectedGrade) { _, _ in triggerSearch() }
+        .onAppear {
+            Task {
+                await appInfo.restorePersistedCookiesIntoStores()
+                await syncCookies()
+            }
+        }
     }
 
     private func triggerSearch() {
@@ -167,11 +174,13 @@ struct DirectoryPersonRow: View {
 struct DirectoryPersonView: View {
     let person: DirectoryPerson
 
+    @State private var clubRoles: [(clubName: String, role: String)] = []
+
     var body: some View {
         List {
             Section {
                 HStack(spacing: 16) {
-                    DirectoryPhoto(urlString: person.photoURL, size: 72)
+                    DirectoryPhoto(urlString: person.photoURL, size: 72, enlargeOnTap: true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(person.displayName).font(.title3.bold())
                         if !person.grade.isEmpty {
@@ -186,6 +195,14 @@ struct DirectoryPersonView: View {
                     }
                 }
                 .padding(.vertical, 4)
+            }
+
+            if !clubRoles.isEmpty {
+                Section("Clubs") {
+                    ForEach(clubRoles, id: \.clubName) { entry in
+                        Label("\(entry.role), \(entry.clubName)", systemImage: "person.3")
+                    }
+                }
             }
 
             ForEach(person.households) { household in
@@ -215,6 +232,9 @@ struct DirectoryPersonView: View {
         .navigationTitle("")
         .inlineNavigationBarTitle()
         .macInsetListStyle()
+        .task(id: person.studentEmail) {
+            clubRoles = await fetchClubRoles(forEmail: person.studentEmail ?? "")
+        }
     }
 }
 
@@ -249,24 +269,80 @@ struct DirectoryPhoto: View {
     let urlString: String?
     let size: CGFloat
     var isReady: Bool = true
+    var enlargeOnTap: Bool = false
+
+    @State private var imageData: Data?
+    @State private var loadFailed = false
+    @State private var showEnlarged = false
 
     var body: some View {
         Group {
-            if isReady, let urlStr = urlString, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
-                    else { placeholderView }
-                }
+            if let imageData, let image = decodedImage(from: imageData) {
+                image.resizable().scaledToFill()
             } else {
                 placeholderView
             }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .contentShape(Circle())
+        .onTapGesture {
+            guard enlargeOnTap, imageData != nil else { return }
+            showEnlarged = true
+        }
+        .task(id: "\(isReady)-\(urlString ?? "")") { await load() }
+        .sheet(isPresented: $showEnlarged) {
+            if let imageData, let image = decodedImage(from: imageData) {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .padding()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private func load() async {
+        guard isReady, let urlStr = urlString, let url = URL(string: urlStr) else { return }
+        if let cached = ImageDataCache.shared.data(for: urlStr) { imageData = cached; return }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                print("[DirectoryPhoto] load failed for \(urlStr): HTTP \(http.statusCode)")
+                loadFailed = true
+                return
+            }
+            ImageDataCache.shared.store(data, for: urlStr)
+            imageData = data
+        } catch {
+            print("[DirectoryPhoto] load failed for \(urlStr): \(error)")
+            loadFailed = true
+        }
     }
 
     private var placeholderView: some View {
         Color(.systemGray5).overlay(Image(systemName: "person.fill").foregroundColor(.secondary))
+    }
+}
+
+// MARK: - Officer Photo (live lookup)
+
+/// Displays a club officer's photo by re-running a live directory search for a freshly-signed
+/// URL, rather than using `ClubOfficer.photoURL`, which is a one-time signed URL that expires.
+struct OfficerPhoto: View {
+    let officer: ClubOfficer
+    let size: CGFloat
+    var isReady: Bool = true
+
+    @State private var freshURL: String?
+
+    var body: some View {
+        DirectoryPhoto(urlString: freshURL, size: size, isReady: isReady && freshURL != nil)
+            .task(id: "\(isReady)-\(officer.email)") {
+                guard isReady, !officer.email.isEmpty else { return }
+                freshURL = await lookupFreshPhotoURL(name: officer.name, email: officer.email)
+            }
     }
 }
 

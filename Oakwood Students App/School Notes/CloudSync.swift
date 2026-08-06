@@ -36,6 +36,7 @@ final class CloudSync<Value: Codable> {
     func push(_ value: Value) {
         guard let data = try? JSONEncoder().encode(value) else { return }
         store.set(data, forKey: key)
+        store.synchronize()
     }
 
     func remoteValue() -> Value? {

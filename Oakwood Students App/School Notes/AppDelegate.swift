@@ -10,6 +10,7 @@ import Combine
 import GoogleSignIn
 import FirebaseCore
 import FirebaseMessaging
+import CloudKit
 
 #if os(iOS)
 import BackgroundTasks
@@ -23,6 +24,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Set notification delegate to show alerts while app is open
         UNUserNotificationCenter.current().delegate = self
+
+        // Nothing in this app ever sets the app icon's badge number (no subscription here
+        // uses shouldBadge, no notification content sets .badge) — so a stuck badge count
+        // can only be a stale leftover from earlier testing. Clear it on every launch.
+        UNUserNotificationCenter.current().setBadgeCount(0)
 
         // Configure FCM token manager
         PushNotificationManager.shared.configure()
@@ -58,6 +64,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         print("Failed to register for remote notifications: \(error)")
     }
 
+    // Handles the silent CKQuerySubscription push from subscribeToClubActivity (Models.swift).
+    // That push carries no alert text of its own — it just wakes the app so it can fetch the
+    // real ClubActivity record and fire a local notification with the actual club/announcement
+    // text via checkForNewClubAnnouncements(), rather than depending on CloudKit's own alert
+    // templating (which needs Xcode localization infrastructure this project doesn't have).
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard CKNotification(fromRemoteNotificationDictionary: userInfo) != nil else {
+            completionHandler(.noData)
+            return
+        }
+        Task {
+            await checkForNewClubAnnouncements()
+            await scheduleFollowedClubEventReminders()
+            completionHandler(.newData)
+        }
+    }
+
     // Show notifications even when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
@@ -81,6 +106,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         Task {
             await GradeNotificationService.shared.checkForNewGradesBackground()
+            await checkForNewClubAnnouncements()
+            await scheduleFollowedClubEventReminders()
             task.setTaskCompleted(success: true)
             GradeNotificationService.shared.scheduleBackgroundRefresh()
         }
@@ -109,8 +136,33 @@ class GoogleSignInViewModel: ObservableObject {
     @Published var isSignedIn = false
     @Published var userName = ""
     @Published var userEmail = ""
+    /// Set when a sign-in attempt succeeds with Google but is rejected because the
+    /// account isn't part of the school's Google Workspace domain. Cleared on any
+    /// successful, accepted sign-in. UI can observe this to surface an error message.
+    @Published var signInError: String? = nil
 
     private let clientID = "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
+
+    /// The school's Google Workspace domain. Only accounts on this domain are permitted
+    /// to sign in (do not confuse with oakwoodway.org, the public marketing site domain).
+    private let allowedDomain = "@oakwoodstudent.org"
+
+    /// Validates a completed Google Sign-In result against the school's Workspace domain
+    /// and updates published state accordingly. Shared by both the iOS and macOS sign-in
+    /// code paths so the enforcement logic lives in exactly one place.
+    private func handleSignInResult(_ result: GIDSignInResult) {
+        let user = result.user
+        let email = user.profile?.email ?? ""
+        guard email.lowercased().hasSuffix(allowedDomain.lowercased()) else {
+            GIDSignIn.sharedInstance.signOut()
+            self.signInError = "Please sign in with your Oakwood Google account (@oakwoodstudent.org), not a personal Google account."
+            return
+        }
+        self.signInError = nil
+        self.userName = user.profile?.name ?? ""
+        self.userEmail = email
+        self.isSignedIn = true
+    }
 
     func signIn() {
         #if os(iOS)
@@ -121,10 +173,7 @@ class GoogleSignInViewModel: ObservableObject {
         Task {
             do {
                 let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController)
-                let user = result.user
-                self.userName = user.profile?.name ?? ""
-                self.userEmail = user.profile?.email ?? ""
-                self.isSignedIn = true
+                self.handleSignInResult(result)
             } catch { }
         }
         #elseif os(macOS)
@@ -133,10 +182,7 @@ class GoogleSignInViewModel: ObservableObject {
         Task {
             do {
                 let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: window)
-                let user = result.user
-                self.userName = user.profile?.name ?? ""
-                self.userEmail = user.profile?.email ?? ""
-                self.isSignedIn = true
+                self.handleSignInResult(result)
             } catch { }
         }
         #endif
@@ -169,6 +215,13 @@ struct SignInView: View {
                     appInfo.googleVM.signIn()
                 }
                 .buttonStyle(.borderedProminent)
+
+                if let signInError = appInfo.googleVM.signInError {
+                    Text(signInError)
+                        .foregroundColor(.red)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
         .padding()

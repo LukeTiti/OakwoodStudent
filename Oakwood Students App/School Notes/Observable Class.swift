@@ -12,6 +12,7 @@ import GoogleSignIn
 import WebKit
 import SwiftSoup
 import WidgetKit
+import CloudKit
 
 struct GoogleLoginSnapshot: Codable {
     var isSignedIn: Bool
@@ -33,6 +34,11 @@ class AppInfo: ObservableObject {
     @Published var classes: [ClassS] = []
     @Published var courses: [Course] = [] {
         didSet { saveCourses() }
+    }
+    /// Total unread assignments across all courses — drives the Grades tab/sidebar badge.
+    /// Live-derived from `courses` (already `@Published`), not stored/persisted.
+    var totalUnreadAssignments: Int {
+        courses.flatMap { $0.assignments ?? [] }.filter { $0.is_unread == 1 }.count
     }
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
@@ -70,6 +76,40 @@ class AppInfo: ObservableObject {
             saveAssignmentInfo()
         }
     }
+    // Small local notes a student can attach to any assignment (real or custom), keyed by
+    // score_id. Deliberately separate from `Assignment.assignment_notes` — that field comes
+    // straight off the Veracross API response and gets overwritten on every re-fetch, so a
+    // note stored there on a real assignment would silently vanish.
+    @Published var assignmentNotes: [Int: String] = [:] {
+        didSet {
+            saveAssignmentNotes()
+        }
+    }
+
+    // Clubs a student follows — sorts them to the top of the clubs list and drives a
+    // CloudKit push subscription (see toggleFollowingClub) so the student gets notified
+    // when a followed club posts a new announcement.
+    @Published var followedClubIDs: Set<String> = [] {
+        didSet {
+            saveFollowedClubIDs()
+        }
+    }
+
+    // Per-device "have I looked at this club's latest announcement" marker, keyed by club id.
+    // Drives `clubsWithUnreadAnnouncements` below. Persisted (and best-effort iCloud-synced —
+    // see `lastViewedClubAtCloudSync`) since it's small and worth carrying across devices, but
+    // syncing it isn't load-bearing: worst case a device just re-shows a badge it already saw.
+    @Published var lastViewedClubAt: [String: Date] = [:] {
+        didSet {
+            saveLastViewedClubAt()
+        }
+    }
+
+    // Live, recomputed-on-demand set of followed club ids that have a newer `postedAt` than
+    // this device has seen (per `lastViewedClubAt`). NOT persisted — always repopulated by
+    // `refreshUnreadClubBadges()` and trimmed locally by `ClubDetailView`/`Mac_ClubDetailView`
+    // when a club is opened.
+    @Published var clubsWithUnreadAnnouncements: Set<String> = []
 
     // MARK: - Community Service
     // `deletedServiceIDs` is a tombstone set: once an id is deleted it's remembered
@@ -94,6 +134,15 @@ class AppInfo: ObservableObject {
     private let assignmentCloudSync = CloudSync<[Int: Bool]>(key: "assignmentInfo") { local, remote in
         local.merging(remote) { $0 || $1 }   // once complete on any device, stays complete everywhere
     }
+    private let assignmentNotesCloudSync = CloudSync<[Int: String]>(key: "assignmentNotes") { local, remote in
+        local.merging(remote) { local, _ in local }   // local wins on conflict — most-recently-edited device isn't tracked, so prefer whichever copy is already on this device
+    }
+    private let followedClubsCloudSync = CloudSync<Set<String>>(key: "followedClubIDs") { local, remote in
+        local.union(remote)   // following is additive — no real "conflict" for a set of ids
+    }
+    private let lastViewedClubAtCloudSync = CloudSync<[String: Date]>(key: "lastViewedClubAt") { local, remote in
+        local.merging(remote) { max($0, $1) }   // whichever device viewed most recently wins per club
+    }
     private let calendarCloudSync = CloudSync<CalendarSubscriptions>(key: "calendarSubscriptions") { local, remote in
         CalendarSubscriptions(
             personalCalendarURL: local.personalCalendarURL ?? remote.personalCalendarURL,
@@ -116,6 +165,9 @@ class AppInfo: ObservableObject {
     init() {
         loadCachedCourses()
         loadAssignmentInfo()
+        loadAssignmentNotes()
+        loadFollowedClubIDs()
+        loadLastViewedClubAt()
         loadBundledGrades()
         loadCustomAssignments()
         loadCookies()
@@ -133,6 +185,9 @@ class AppInfo: ObservableObject {
 
         // Reconcile local data with iCloud now that everything's loaded locally
         info = assignmentCloudSync.reconcile(local: info)
+        assignmentNotes = assignmentNotesCloudSync.reconcile(local: assignmentNotes)
+        followedClubIDs = followedClubsCloudSync.reconcile(local: followedClubIDs)
+        lastViewedClubAt = lastViewedClubAtCloudSync.reconcile(local: lastViewedClubAt)
         let mergedCalendar = calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
         personalCalendarURL = mergedCalendar.personalCalendarURL
         practiceCalendarURLs = mergedCalendar.practiceCalendarURLs
@@ -149,6 +204,9 @@ class AppInfo: ObservableObject {
         ) { [weak self] _ in
             guard let self else { return }
             self.info = self.assignmentCloudSync.reconcile(local: self.info)
+            self.assignmentNotes = self.assignmentNotesCloudSync.reconcile(local: self.assignmentNotes)
+            self.followedClubIDs = self.followedClubsCloudSync.reconcile(local: self.followedClubIDs)
+            self.lastViewedClubAt = self.lastViewedClubAtCloudSync.reconcile(local: self.lastViewedClubAt)
             let merged = self.calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: self.personalCalendarURL, practiceCalendarURLs: self.practiceCalendarURLs))
             self.personalCalendarURL = merged.personalCalendarURL
             self.practiceCalendarURLs = merged.practiceCalendarURLs
@@ -178,6 +236,10 @@ class AppInfo: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // DIAGNOSTIC TEST ONLY — see subscribeToDatabaseTest() in Models.swift.
+        // Idempotent (fixed subscriptionID), safe to fire on every launch.
+        Task { await subscribeToDatabaseTest() }
     }
 
     private func saveCourses() {
@@ -241,6 +303,110 @@ class AppInfo: ObservableObject {
         }
     }
 
+    private func saveAssignmentNotes() {
+        if let encoded = try? JSONEncoder().encode(assignmentNotes) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentNotes")
+        }
+        assignmentNotesCloudSync.push(assignmentNotes)
+    }
+
+    private func loadAssignmentNotes() {
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotes"),
+           let decoded = try? JSONDecoder().decode([Int: String].self, from: data) {
+            assignmentNotes = decoded
+        }
+    }
+
+    /// Sets (or clears, if `note` is empty/whitespace-only) the local note for an assignment.
+    /// Stores the untrimmed text (not the trimmed check value) so a trailing space the user
+    /// just typed doesn't visibly vanish out from under them on every keystroke.
+    func setNote(_ note: String, for scoreId: Int) {
+        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            assignmentNotes.removeValue(forKey: scoreId)
+        } else {
+            assignmentNotes[scoreId] = note
+        }
+    }
+
+    // MARK: - Followed Clubs
+
+    private func saveFollowedClubIDs() {
+        if let encoded = try? JSONEncoder().encode(followedClubIDs) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "followedClubIDs")
+        }
+        followedClubsCloudSync.push(followedClubIDs)
+    }
+
+    private func loadFollowedClubIDs() {
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            followedClubIDs = decoded
+        }
+    }
+
+    /// Toggles following a club: flips local state (auto-synced to iCloud via
+    /// `followedClubsCloudSync` above, and sorts the club to the top of the clubs list)
+    /// and creates/deletes the matching CloudKit subscription so this device gets a push
+    /// notification when the club posts a new announcement. The CloudKit side effect is
+    /// best-effort and runs off the main actor — see `subscribeToClubActivity`/
+    /// `unsubscribeFromClubActivity` in Models.swift.
+    func toggleFollowingClub(_ clubId: String) {
+        if followedClubIDs.contains(clubId) {
+            followedClubIDs.remove(clubId)
+            Task { await unsubscribeFromClubActivity(clubId: clubId) }
+        } else {
+            followedClubIDs.insert(clubId)
+            Task { await subscribeToClubActivity(clubId: clubId) }
+        }
+    }
+
+    // MARK: - Club Unread Badges
+
+    private func saveLastViewedClubAt() {
+        if let encoded = try? JSONEncoder().encode(lastViewedClubAt) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "lastViewedClubAt")
+        }
+        lastViewedClubAtCloudSync.push(lastViewedClubAt)
+    }
+
+    private func loadLastViewedClubAt() {
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "lastViewedClubAt"),
+           let decoded = try? JSONDecoder().decode([String: Date].self, from: data) {
+            lastViewedClubAt = decoded
+        }
+    }
+
+    /// Marks a club as viewed right now. Called when its detail view appears — the caller is
+    /// also responsible for removing the club from `clubsWithUnreadAnnouncements` locally so
+    /// the badge disappears immediately, rather than waiting on the next `refreshUnreadClubBadges()`.
+    func markClubViewed(_ clubId: String) {
+        lastViewedClubAt[clubId] = Date()
+    }
+
+    /// Recomputes `clubsWithUnreadAnnouncements` by checking each followed club's `ClubActivity`
+    /// CloudKit record for a `postedAt` newer than this device's `lastViewedClubAt` entry (a club
+    /// never viewed counts as unread if it has posted at all). Mirrors the per-club fetch in
+    /// `checkForNewClubAnnouncements()` (Models.swift) — deliberately not shared/merged with it,
+    /// since that function drives a different feature (local notifications) and keeping them
+    /// independent keeps each simple. Sequential network calls are fine here; followed-club counts
+    /// are small and this isn't performance-sensitive.
+    func refreshUnreadClubBadges() async {
+        guard !followedClubIDs.isEmpty else {
+            await MainActor.run { clubsWithUnreadAnnouncements = [] }
+            return
+        }
+
+        var unread: Set<String> = []
+        for clubId in followedClubIDs {
+            guard let record = try? await CKContainer.default().publicCloudDatabase.record(for: CKRecord.ID(recordName: "club-activity-\(clubId)")),
+                  let postedAt = record["postedAt"] as? Date else { continue }
+            let isUnread = lastViewedClubAt[clubId].map { postedAt > $0 } ?? true
+            if isUnread { unread.insert(clubId) }
+        }
+
+        await MainActor.run { self.clubsWithUnreadAnnouncements = unread }
+    }
+
     // MARK: - Custom Assignments
 
     private func saveCustomAssignments() {
@@ -263,12 +429,23 @@ class AppInfo: ObservableObject {
         formatter.dateFormat = "MMM dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
 
+        // Full, unambiguous date (matches Assignment.fullDateFormatter in Models.swift) so
+        // Assignment.dueDate takes the `_date` branch and skips the due_date year-guessing
+        // heuristic, which assumes Aug-Dec dates belong to the previous year — correct for
+        // parsing stale bundled Veracross JSON, wrong for a custom assignment created today.
+        // Uses the system/local timezone (like Assignment.fullDateFormatter) so the round trip
+        // through the local calendar day introduces no shift.
+        let fullFormatter = DateFormatter()
+        fullFormatter.dateFormat = "MM/dd/yyyy"
+        fullFormatter.locale = Locale(identifier: "en_US_POSIX")
+
         let assignment = Assignment(
             score_id: nextCustomId,
             assignment_type: type,
             assignment_description: description,
             assignment_notes: notes.isEmpty ? nil : notes,
             due_date: formatter.string(from: dueDate),
+            _date: fullFormatter.string(from: dueDate),
             customCourseName: courseName
         )
         nextCustomId -= 1
@@ -279,6 +456,7 @@ class AppInfo: ObservableObject {
     func deleteCustomAssignment(scoreId: Int) {
         customAssignments.removeAll { $0.score_id == scoreId }
         info.removeValue(forKey: scoreId)
+        assignmentNotes.removeValue(forKey: scoreId)
     }
 
     func markPastAssignmentsCompleted() {
@@ -288,6 +466,11 @@ class AppInfo: ObservableObject {
                 if let due = assignment.dueDate, due < now {
                     info[assignment.score_id] = true
                 }
+            }
+        }
+        for assignment in customAssignments {
+            if let due = assignment.dueDate, due < now {
+                info[assignment.score_id] = true
             }
         }
     }

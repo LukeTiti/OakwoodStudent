@@ -3,7 +3,9 @@
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "/sign/**", "destination": "/sign/index.html" }
+      { "source": "/sign/**", "destination": "/sign/index.html" },
+      { "source": "/advisor/**", "destination": "/advisor/index.html" },
+      { "source": "/api/ics-proxy", "function": "icsProxy" }
     ]
   },
   "functions": [

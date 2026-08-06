@@ -112,6 +112,12 @@ struct ToDoPage: View {
                             Text("Past Due Assignments")
                             Spacer()
                             Button {
+                                withAnimation { appInfo.markPastAssignmentsCompleted() }
+                            } label: {
+                                Image(systemName: "checkmark.circle")
+                            }
+                            .accessibilityLabel("Mark All Past Due as Complete")
+                            Button {
                                 withAnimation { hidePastDue.toggle() }
                             } label: {
                                 Image(systemName: hidePastDue ? "eye.slash" : "eye")
@@ -232,6 +238,13 @@ struct ShowAssignment: View {
                             .foregroundColor(.blue)
                     }
                 }
+
+                if let note = appInfo.assignmentNotes[assignment.score_id], !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing) {
@@ -300,6 +313,13 @@ struct AssignmentDetailView: View {
 
     private var isCustom: Bool { assignment.score_id < 0 }
 
+    private var myNoteBinding: Binding<String> {
+        Binding(
+            get: { appInfo.assignmentNotes[assignment.score_id, default: ""] },
+            set: { appInfo.setNote($0, for: assignment.score_id) }
+        )
+    }
+
     var body: some View {
         List {
             Section {
@@ -358,6 +378,11 @@ struct AssignmentDetailView: View {
                     Text(linkedAttributedString(from: notes))
                         .font(.body)
                 }
+            }
+
+            Section("My Note") {
+                TextField("Add a note", text: myNoteBinding, axis: .vertical)
+                    .lineLimit(2...6)
             }
 
             if let attachments = assignment.attachments, !attachments.isEmpty {

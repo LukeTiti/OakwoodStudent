@@ -106,6 +106,7 @@
 				Mac/Mac_DirectoryView.swift = (macos, );
 				Mac/Mac_GradesStatsSheet.swift = (macos, );
 				Mac/Mac_GradesView.swift = (macos, );
+				Mac/Mac_OnboardingView.swift = (macos, );
 				Mac/Mac_QuickLinksView.swift = (macos, );
 				Mac/Mac_ToDoView.swift = (macos, );
 				OnboardingView.swift = (ios, );

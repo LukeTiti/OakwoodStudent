@@ -70,7 +70,9 @@ struct Mac_ToDoView: View {
         ScrollView([.horizontal, .vertical]) {
             HStack(alignment: .top, spacing: 16) {
                 if !pastDueAssignments.isEmpty {
-                    Mac_DayColumn(title: "Past Due", titleColor: .red, assignments: pastDueAssignments)
+                    Mac_DayColumn(title: "Past Due", titleColor: .red, assignments: pastDueAssignments, onMarkAllComplete: {
+                        withAnimation { appInfo.markPastAssignmentsCompleted() }
+                    })
                 }
                 ForEach(0..<daysAhead, id: \.self) { offset in
                     Mac_DayColumn(title: columnTitle(for: offset), titleColor: .primary, assignments: assignmentsDue(dayOffset: offset))
@@ -148,12 +150,23 @@ private struct Mac_DayColumn: View {
     let title: String
     let titleColor: Color
     let assignments: [(assignment: Assignment, courseName: String)]
+    var onMarkAllComplete: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(titleColor)
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(titleColor)
+                if let onMarkAllComplete {
+                    Spacer()
+                    Button(action: onMarkAllComplete) {
+                        Image(systemName: "checkmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mark All Past Due as Complete")
+                }
+            }
             ForEach(assignments, id: \.assignment.score_id) { item in
                 Mac_AssignmentCard(assignment: item.assignment, courseName: item.courseName)
             }
@@ -189,6 +202,12 @@ private struct Mac_AssignmentCard: View {
                 Text(courseName)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+            if let note = appInfo.assignmentNotes[assignment.score_id], !note.isEmpty {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
         .padding(8)
@@ -240,6 +259,13 @@ struct Mac_AssignmentDetailView: View {
     private var isCustom: Bool { assignment.score_id < 0 }
     private var isComplete: Bool { appInfo.info[assignment.score_id, default: false] }
 
+    private var myNoteBinding: Binding<String> {
+        Binding(
+            get: { appInfo.assignmentNotes[assignment.score_id, default: ""] },
+            set: { appInfo.setNote($0, for: assignment.score_id) }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -289,6 +315,13 @@ struct Mac_AssignmentDetailView: View {
                         Text("Notes").font(.subheadline.weight(.semibold))
                         Text(linkedAttributedString(from: notes))
                     }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("My Note").font(.subheadline.weight(.semibold))
+                    TextField("Add a note", text: myNoteBinding, axis: .vertical)
+                        .lineLimit(2...6)
+                        .textFieldStyle(.roundedBorder)
                 }
 
                 if let attachments = assignment.attachments, !attachments.isEmpty {

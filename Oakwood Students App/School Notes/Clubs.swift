@@ -16,6 +16,12 @@ struct ClubsView: View {
 
     private var userEmail: String { appInfo.googleVM.userEmail }
     private var isSuperAdmin: Bool { userEmail.lowercased() == superAdminEmail }
+    // Followed clubs sort to the top; each group keeps alphabetical order.
+    private var sortedClubs: [Club] {
+        clubs.sorted {
+            (appInfo.followedClubIDs.contains($0.id) ? 0 : 1, $0.name) < (appInfo.followedClubIDs.contains($1.id) ? 0 : 1, $1.name)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,7 +39,7 @@ struct ClubsView: View {
             } else if clubs.isEmpty {
                 Spacer(); Text("No clubs yet").foregroundColor(.secondary); Spacer()
             } else {
-                List(clubs) { club in
+                List(sortedClubs) { club in
                     NavigationLink(destination: ClubDetailView(club: club,
                         onUpdate: { updated in if let i = clubs.firstIndex(where: { $0.id == updated.id }) { clubs[i] = updated } },
                         onDelete: { clubs.removeAll { $0.id == club.id } }
@@ -44,6 +50,13 @@ struct ClubsView: View {
                                 Text(club.name).font(.body.weight(.semibold))
                                 let s = club.meetingScheduleDisplay
                                 if !s.isEmpty { Text(s).font(.caption).foregroundColor(.secondary) }
+                            }
+                            Spacer()
+                            if appInfo.followedClubIDs.contains(club.id) {
+                                Image(systemName: "bell.fill").font(.caption).foregroundColor(.secondary)
+                            }
+                            if appInfo.clubsWithUnreadAnnouncements.contains(club.id) {
+                                Circle().fill(Color.red).frame(width: 8, height: 8)
                             }
                         }.padding(.vertical, 2)
                     }
@@ -57,7 +70,10 @@ struct ClubsView: View {
             Button("Create") { Task { await createClub() } }
             Button("Cancel", role: .cancel) { newClubName = "" }
         }
-        .onAppear { Task { await loadClubs() } }
+        .onAppear {
+            Task { await loadClubs() }
+            Task { await appInfo.refreshUnreadClubBadges() }
+        }
     }
 
     private func loadClubs() async {
@@ -114,10 +130,32 @@ struct ClubDetailView: View {
                         .frame(maxWidth: .infinity)
                         .listRowInsets(EdgeInsets())
                 }
-                // Info
-                if !club.description.isEmpty || !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
+                // About — also surfaces the latest announcement right under the description,
+                // since iOS has less room to scroll all the way down to the full list for it.
+                if !club.description.isEmpty || announcements.first != nil {
                     Section {
-                        if !club.description.isEmpty { Text(club.description).font(.subheadline).foregroundColor(.secondary) }
+                        if !club.description.isEmpty {
+                            Text(club.description)
+                                .font(.body)
+                                .foregroundColor(.primary)
+                        }
+                        if let latest = announcements.first {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(latest.title).font(.body.weight(.semibold))
+                                if !latest.message.isEmpty { Text(latest.message).font(.subheadline).foregroundColor(.secondary) }
+                                HStack {
+                                    Text(latest.authorName).font(.caption2).foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(latest.postedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                // Info
+                if !club.meetingScheduleDisplay.isEmpty || !club.meetingLocation.isEmpty {
+                    Section {
                         let s = club.meetingScheduleDisplay
                         if !s.isEmpty { Label(s, systemImage: "clock").font(.subheadline) }
                         if !club.meetingLocation.isEmpty { Label(club.meetingLocation, systemImage: "mappin.circle").font(.subheadline) }
@@ -129,7 +167,7 @@ struct ClubDetailView: View {
                     Section("Officers") {
                         ForEach(club.officers) { o in
                             HStack(spacing: 12) {
-                                DirectoryPhoto(urlString: o.photoURL, size: 44, isReady: cookiesReady)
+                                OfficerPhoto(officer: o, size: 44, isReady: cookiesReady)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(o.name).font(.body)
                                     Text(o.role).font(.caption).foregroundColor(.secondary)
@@ -146,7 +184,19 @@ struct ClubDetailView: View {
                     }
                 }
 
-                // Announcements
+                // Upcoming Events
+                Section {
+                    if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
+                    else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundColor(.secondary).font(.subheadline) }
+                    else {
+                        ForEach(upcomingEvents) { event in
+                            ClubEventRow(event: event).swipeActions { if canEdit { eventSwipeActions(event) } }
+                        }
+                    }
+                    if canEdit { Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") } }
+                } header: { Text("Upcoming Events") }
+
+                // Past Announcements
                 Section {
                     if isLoadingAnnouncements { HStack { Spacer(); ProgressView(); Spacer() } }
                     else if announcements.isEmpty { Text("No announcements").foregroundColor(.secondary).font(.subheadline) }
@@ -166,19 +216,7 @@ struct ClubDetailView: View {
                         }
                     }
                     if canEdit { Button { showAddAnnouncement = true } label: { Label("Post Announcement", systemImage: "megaphone") } }
-                } header: { Text("Announcements") }
-
-                // Upcoming Events
-                Section {
-                    if isLoadingEvents { HStack { Spacer(); ProgressView(); Spacer() } }
-                    else if upcomingEvents.isEmpty { Text("No upcoming events").foregroundColor(.secondary).font(.subheadline) }
-                    else {
-                        ForEach(upcomingEvents) { event in
-                            ClubEventRow(event: event).swipeActions { if canEdit { eventSwipeActions(event) } }
-                        }
-                    }
-                    if canEdit { Button { showAddEvent = true } label: { Label("Add Event", systemImage: "plus.circle") } }
-                } header: { Text("Upcoming Events") }
+                } header: { Text("Past Announcements") }
 
                 if !pastEvents.isEmpty {
                     Section("Past Events") {
@@ -194,6 +232,11 @@ struct ClubDetailView: View {
         .navigationTitle("")
         .inlineNavigationBarTitle()
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { appInfo.toggleFollowingClub(club.id) } label: {
+                    Image(systemName: appInfo.followedClubIDs.contains(club.id) ? "bell.fill" : "bell")
+                }
+            }
             if canEdit {
                 ToolbarItem(placement: .confirmationAction) {
                     Menu {
@@ -210,10 +253,12 @@ struct ClubDetailView: View {
         }
         .sheet(isPresented: $showEdit) { ClubEditView(club: club) { club = $0; onUpdate($0) } }
         .sheet(isPresented: $showManageEditors) { ClubEditorManagerView(club: $club) { Task { try? await FirebaseService.shared.updateClub(club) } } }
-        .sheet(isPresented: $showAddEvent) { ClubEventFormView(clubId: club.id, event: nil) { await loadEvents() } }
-        .sheet(item: $editingEvent) { ClubEventFormView(clubId: club.id, event: $0) { await loadEvents() } }
-        .sheet(isPresented: $showAddAnnouncement) { ClubAnnouncementFormView(clubId: club.id, authorName: appInfo.googleVM.userName) { await loadAnnouncements() } }
+        .sheet(isPresented: $showAddEvent) { ClubEventFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName, event: nil) { await loadEvents() } }
+        .sheet(item: $editingEvent) { ClubEventFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName, event: $0) { await loadEvents() } }
+        .sheet(isPresented: $showAddAnnouncement) { ClubAnnouncementFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName) { await loadAnnouncements() } }
         .onAppear {
+            appInfo.markClubViewed(club.id)
+            appInfo.clubsWithUnreadAnnouncements.remove(club.id)
             Task {
                 // Officer photos are Veracross-hosted and need an authenticated session to
                 // load, same as any other Veracross image/document — unlike events/announcements
@@ -242,6 +287,7 @@ struct ClubDetailView: View {
         isLoadingEvents = true
         events = (try? await FirebaseService.shared.fetchClubEvents(clubId: club.id)) ?? []
         isLoadingEvents = false
+        if appInfo.followedClubIDs.contains(club.id) { scheduleEventReminders(clubName: club.name, events: events) }
     }
     private func loadAnnouncements() async {
         isLoadingAnnouncements = true
@@ -276,6 +322,8 @@ struct ClubEditView: View {
     @State private var showOfficerPicker = false
     @State private var pendingPerson: DirectoryPerson? = nil
     @State private var roleInput = ""
+    @State private var editingOfficer: ClubOfficer? = nil
+    @State private var editRoleInput = ""
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var isUploadingImage = false
     @State private var uploadError: String? = nil
@@ -335,10 +383,15 @@ struct ClubEditView: View {
                 }
                 Section {
                     ForEach(club.officers) { o in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(o.name).font(.body)
-                            Text(o.role).font(.caption).foregroundColor(.secondary)
-                            if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundColor(.secondary) }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(o.name).font(.body)
+                                Text(o.role).font(.caption).foregroundColor(.secondary)
+                                if !o.email.isEmpty { Text(o.email).font(.caption2).foregroundColor(.secondary) }
+                            }
+                            Spacer()
+                            Button { editingOfficer = o; editRoleInput = o.role } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.plain)
                         }
                         .padding(.vertical, 2)
                         .swipeActions { Button(role: .destructive) { club.officers.removeAll { $0.id == o.id } } label: { Label("Remove", systemImage: "trash") } }
@@ -375,6 +428,16 @@ struct ClubEditView: View {
                     pendingPerson = nil
                 }
                 Button("Cancel", role: .cancel) { pendingPerson = nil }
+            }
+            .alert("Edit Role", isPresented: Binding(get: { editingOfficer != nil }, set: { if !$0 { editingOfficer = nil } })) {
+                TextField("e.g. President, Secretary", text: $editRoleInput)
+                Button("Save") {
+                    guard let officer = editingOfficer, !editRoleInput.trimmingCharacters(in: .whitespaces).isEmpty,
+                          let idx = club.officers.firstIndex(where: { $0.id == officer.id }) else { return }
+                    club.officers[idx].role = editRoleInput.trimmingCharacters(in: .whitespaces)
+                    editingOfficer = nil
+                }
+                Button("Cancel", role: .cancel) { editingOfficer = nil }
             }
             .onChange(of: selectedPhotoItem) { _, newItem in
                 guard let newItem else { return }
@@ -490,6 +553,8 @@ struct ClubDirectoryPickerView: View {
 
 struct ClubEventFormView: View {
     let clubId: String
+    let clubName: String
+    let authorName: String
     let event: ClubEvent?
     var onSave: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -522,13 +587,14 @@ struct ClubEventFormView: View {
 
     private func save() async {
         isSaving = true
-        try? await FirebaseService.shared.saveClubEvent(clubId: clubId, event: ClubEvent(id: event?.id ?? "", title: title, date: date, location: location, description: desc))
+        try? await FirebaseService.shared.saveClubEvent(clubId: clubId, clubName: clubName, authorName: authorName, event: ClubEvent(id: event?.id ?? "", title: title, date: date, location: location, description: desc))
         await onSave(); dismiss()
     }
 }
 
 struct ClubAnnouncementFormView: View {
     let clubId: String
+    let clubName: String
     let authorName: String
     var onSave: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -556,7 +622,7 @@ struct ClubAnnouncementFormView: View {
 
     private func save() async {
         isSaving = true
-        try? await FirebaseService.shared.saveClubAnnouncement(clubId: clubId, ann: ClubAnnouncement(id: "", title: title, message: message, postedAt: Date(), authorName: authorName))
+        try? await FirebaseService.shared.saveClubAnnouncement(clubId: clubId, clubName: clubName, ann: ClubAnnouncement(id: "", title: title, message: message, postedAt: Date(), authorName: authorName))
         await onSave(); dismiss()
     }
 }
