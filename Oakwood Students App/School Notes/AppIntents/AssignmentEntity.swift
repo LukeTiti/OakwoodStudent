@@ -3,6 +3,7 @@ import CoreLocation
 import Foundation
 import MapKit
 
+@available(iOS 27.0, macOS 27.0, *)
 @AppEntity(schema: .reminders.reminder)
 struct AssignmentEntity: IndexedEntity {
     @DeferredProperty
@@ -30,7 +31,8 @@ struct AssignmentEntity: IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(title)",
-            subtitle: "\(list.name)"
+            subtitle: "\(list.name)",
+            image: .init(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
         )
     }
 
@@ -52,6 +54,7 @@ struct AssignmentEntity: IndexedEntity {
     }
 }
 
+@available(iOS 27.0, macOS 27.0, *)
 @AppEntity(schema: .reminders.locationTrigger)
 struct LocationTriggerEntity: AppEntity {
     static let defaultQuery = LocationTriggerQuery()
@@ -68,6 +71,7 @@ struct LocationTriggerEntity: AppEntity {
     }
 }
 
+@available(iOS 27.0, macOS 27.0, *)
 @AppEnum(schema: .reminders.locationTriggerEvent)
 enum LocationTriggerEventType: String, AppEnum {
     case arrive
@@ -78,6 +82,7 @@ enum LocationTriggerEventType: String, AppEnum {
     ]
 }
 
+@available(iOS 27.0, macOS 27.0, *)
 extension AssignmentEntity {
     struct AssignmentQuery: EntityPropertyQuery {
         typealias ComparatorMappingType = (AssignmentEntity) -> Bool

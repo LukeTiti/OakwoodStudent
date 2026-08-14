@@ -283,7 +283,7 @@ struct EventView: View {
     @State private var showShare = false
 
     var body: some View {
-        WebView(url: URL(string: events?.link ?? "")!)
+        SimpleWebView(url: URL(string: events?.link ?? "")!)
             .navigationTitle(events?.title ?? "")
             .inlineNavigationBarTitle()
             .toolbar {
@@ -302,4 +302,29 @@ struct EventView: View {
             }
     }
 }
+
+/// Plain WKWebView wrapper for showing a single article's page — deliberately not the newer
+/// SwiftUI-native WebView/WebPage API, which requires iOS/macOS 26+; this app's deployment
+/// target is 18, so it needs the older UIViewRepresentable/NSViewRepresentable route instead.
+#if os(iOS)
+struct SimpleWebView: UIViewRepresentable {
+    let url: URL
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+#elseif os(macOS)
+struct SimpleWebView: NSViewRepresentable {
+    let url: URL
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+#endif
 

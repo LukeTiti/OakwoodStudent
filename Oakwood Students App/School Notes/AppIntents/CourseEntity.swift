@@ -1,5 +1,6 @@
 import AppIntents
 
+@available(iOS 27.0, macOS 27.0, *)
 @AppEntity(schema: .reminders.list)
 struct CourseEntity: IndexedEntity {
 
@@ -24,6 +25,7 @@ struct CourseEntity: IndexedEntity {
     }
 }
 
+@available(iOS 27.0, macOS 27.0, *)
 @AppEnum(schema: .reminders.listType)
 enum CourseListType: String, AppEnum {
     case standard
@@ -34,6 +36,7 @@ enum CourseListType: String, AppEnum {
     ]
 }
 
+@available(iOS 27.0, macOS 27.0, *)
 extension CourseEntity {
     struct CourseQuery: EntityQuery {
         func entities(for identifiers: [String]) async throws -> [CourseEntity] {

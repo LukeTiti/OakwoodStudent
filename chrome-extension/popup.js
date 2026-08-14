@@ -15,13 +15,14 @@ const FIREBASE_PROJECT_ID = "oakwoodstudents-d9495";
 // Advisor roster — keep in sync with FirebaseService.swift's advisorList.
 const ADVISOR_LIST = ["Mr. Hubbard", "Mrs. Call", "Mr. Willis", "Dr. Pak", "Mr. Clink"];
 
-// TODO: confirm real values via the Lookup Value Lists button before real
-// approvals will actually succeed — until then, creates from the Pending
-// Approvals flow will fail with these left null (Veracross likely requires
-// them). The hardcoded Test Create button below still uses known-good
-// values (3 / 50) and is unaffected by these.
-const VOLUNTEER_JOB_CATEGORY = null;
-const GRADING_PERIOD = null;
+// Reusing the same values already proven to work against a real Veracross
+// record via the hardcoded Test Create button (see commit "Prove Veracross
+// write path via extension") — good enough for a first real end-to-end
+// test with real student names/hours. Revisit via the Lookup Value Lists
+// button once there's a reason to believe these aren't the right codes for
+// every category/grading period going forward (e.g. a new school year).
+const VOLUNTEER_JOB_CATEGORY = 3;
+const GRADING_PERIOD = 50;
 
 const pullBtn = document.getElementById("pullBtn");
 const updateBtn = document.getElementById("updateBtn");
@@ -564,7 +565,7 @@ async function approveForm(form, btn) {
     const allOk = successFlags.length > 0 && successFlags.every(Boolean);
     if (!allOk) {
       setStatus(
-        `${successFlags.filter(Boolean).length}/${results.length} entries actually created in Veracross — NOT marking approved. Check you're logged into axiom.veracross.com, and that VOLUNTEER_JOB_CATEGORY/GRADING_PERIOD (still null placeholders) are filled in. See output for details.`,
+        `${successFlags.filter(Boolean).length}/${results.length} entries actually created in Veracross — NOT marking approved. Check you're logged into axiom.veracross.com. See output for details.`,
         "error"
       );
       return;
