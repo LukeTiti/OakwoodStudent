@@ -31,11 +31,11 @@ struct SettingsView: View {
     // same platform) — see ContentView.swift / Mac_ContentView.swift's top-level gate.
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
 
-    // Manual Veracross login trigger — independent of `isBundledMode`. Directory and
-    // Community Service always hit live Veracross endpoints (never part of the bundled
-    // summer JSON), so users need a way to establish a real session even while Grades/To Do
-    // are running off bundled data. See root CLAUDE.md "Bundled Summer Mode" section.
+    // Manual Veracross login trigger — lets users establish a real session on demand
+    // (e.g. after a cookie expires) independent of any specific view's own auth flow.
     @State private var showVeracrossLogin = false
+
+    @State private var showResetCloudSyncConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -122,6 +122,52 @@ struct SettingsView: View {
                     }
                 }
 
+                // Class Colors Section — optional per-class color, shown as a border on Mac
+                // assignment cards and a tint on class name headers in Grades (see AppInfo.classColor).
+                if !appInfo.courses.isEmpty {
+                    Section {
+                        ForEach(appInfo.courses) { course in
+                            HStack {
+                                Text(course.class_name)
+                                    .lineLimit(1)
+                                Spacer()
+                                if appInfo.classColor(for: course) != nil {
+                                    Button {
+                                        appInfo.setClassColor(nil, for: course)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                ColorPicker("", selection: classColorBinding(for: course), supportsOpacity: false)
+                                    .labelsHidden()
+                            }
+                        }
+                        if !appInfo.classColors.isEmpty {
+                            Button(role: .destructive) {
+                                appInfo.classColors = [:]
+                            } label: {
+                                Text("Reset All Class Colors")
+                            }
+                        }
+                    } header: {
+                        Text("Class Colors")
+                    } footer: {
+                        Text("Optional — pick a color to highlight a class throughout the app.")
+                    }
+                }
+
+                // To Do default view — a synced preference (see AppInfo.todoDefaultShowAll) that
+                // seeds ToDoPage/Mac_ToDoView's own "Show All"/"Hide Done" toggle on first appear.
+                Section {
+                    Toggle("Show All Assignments by Default", isOn: $appInfo.todoDefaultShowAll)
+                } header: {
+                    Text("To Do")
+                } footer: {
+                    Text("When off, the To Do page starts hiding completed assignments. You can still toggle Show All/Hide Done per visit.")
+                }
+
                 // App Info Section
                 Section("About") {
                     HStack {
@@ -130,9 +176,6 @@ struct SettingsView: View {
                         Text(appVersionString)
                             .foregroundColor(.secondary)
                     }
-                    HStack {
-                        Text("Please report any suggestions or issues to Luke Titi, Big thanks to everyone who is testing this app!")
-                    }
                 }
 
                 Section("Onboarding (Debug)") {
@@ -140,6 +183,29 @@ struct SettingsView: View {
                         hasCompletedOnboarding = false
                     }
                     .foregroundColor(.red)
+                }
+
+                // Wipes assignment completion/notes, followed clubs, calendar links, and
+                // community service entries — both locally and from iCloud. Must be tapped on
+                // EVERY device to actually converge; one device alone will just get overwritten
+                // by whatever the other device still has on the next sync.
+                Section("iCloud Sync (Debug)") {
+                    Button("Reset All Synced Data") {
+                        showResetCloudSyncConfirm = true
+                    }
+                    .foregroundColor(.red)
+                }
+                .confirmationDialog(
+                    "Reset all synced data?",
+                    isPresented: $showResetCloudSyncConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Reset Everything", role: .destructive) {
+                        Task { await appInfo.resetCloudSyncedData() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This clears assignment completion, notes, followed clubs, calendar links, and community service entries — locally and in iCloud. Run this on every device to truly start fresh.")
                 }
 
                 // CloudKit Notification Lab (Debug) — experimental diagnostics for tracking
@@ -259,6 +325,16 @@ struct SettingsView: View {
             }
             #endif
         }
+    }
+
+    /// Binding used by each Class Colors row's ColorPicker. Falls back to `.gray` when no
+    /// custom color is set yet — purely the picker's initial swatch, not a stored value; nothing
+    /// is written to `appInfo.classColors` until the student actually picks a color.
+    private func classColorBinding(for course: Course) -> Binding<Color> {
+        Binding(
+            get: { appInfo.classColor(for: course) ?? .gray },
+            set: { appInfo.setClassColor($0, for: course) }
+        )
     }
 
     /// Runs a CloudKit Notification Lab diagnostic test on a background Task and reflects its

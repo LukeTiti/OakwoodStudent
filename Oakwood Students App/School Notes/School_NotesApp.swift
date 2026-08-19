@@ -33,9 +33,11 @@ struct School_NotesApp: App {
             Mac_ContentView()
                 .environmentObject(appInfo)
                 .frame(minWidth: 600, idealWidth: 900, minHeight: 550, idealHeight: 700)
+                .onAppear { appInfo.startCloudSyncPolling() }
             #else
             ContentView()
                 .environmentObject(appInfo)
+                .onAppear { appInfo.startCloudSyncPolling() }
                 .onOpenURL { url in
                     guard url.scheme == "oakwood" else { return }
                     if url.host() == "assignment",
@@ -47,13 +49,18 @@ struct School_NotesApp: App {
                 }
             #endif
         }
-        #if os(iOS)
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                appInfo.startCloudSyncPolling()
+            } else {
+                appInfo.stopCloudSyncPolling()
+            }
+            #if os(iOS)
             if newPhase == .background {
                 GradeNotificationService.shared.scheduleBackgroundRefresh()
             }
+            #endif
         }
-        #endif
 
         #if os(macOS)
         Settings {

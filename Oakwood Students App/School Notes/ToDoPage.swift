@@ -10,6 +10,7 @@ struct ToDoPage: View {
     @State var errorMessage = ""
     @State private var showAddAssignment = false
     @State private var showAll = false
+    @State private var hasSeededShowAllDefault = false
     @State private var hidePastDue = false
     @EnvironmentObject var appInfo: AppInfo
     @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
@@ -90,7 +91,7 @@ struct ToDoPage: View {
         case 1: return "Tomorrow's Assignments"
         default:
             return Calendar.current.date(byAdding: .day, value: dayOffset, to: Date())
-                .map { $0.formatted(.dateTime.weekday(.wide)) } ?? ""
+                .map { $0.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()) } ?? ""
         }
     }
 
@@ -105,6 +106,7 @@ struct ToDoPage: View {
                                     ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
                                 }
                                 .unreadRowBackground(item.assignment.is_unread)
+                                .classColorRowBackground(appInfo.classColor(forCourseName: item.courseName))
                             }
                         }
                     } header: {
@@ -126,7 +128,7 @@ struct ToDoPage: View {
                         }
                     }
                 }
-                ForEach(0...10, id: \.self) { dayOffset in
+                ForEach(0...40, id: \.self) { dayOffset in
                     let items = assignmentsDue(dayOffset: dayOffset)
                     if !items.isEmpty {
                         Section(header: Text(sectionHeader(for: dayOffset))) {
@@ -134,6 +136,7 @@ struct ToDoPage: View {
                                 NavigationLink(destination: AssignmentDetailView(assignment: item.assignment, courseName: item.courseName)) {
                                     ShowAssignment(assignment: item.assignment, courseName: item.courseName, onComplete: triggerToast)
                                 }
+                                .classColorRowBackground(appInfo.classColor(forCourseName: item.courseName))
                             }
                         }
                     }
@@ -181,6 +184,13 @@ struct ToDoPage: View {
             }
         }
         .onAppear {
+            // Seed the local "Show All"/"Hide Done" toggle from the synced default exactly once
+            // per view instance — not on every reappearance, so a manual per-session toggle
+            // (e.g. switching tabs and back) doesn't keep getting stomped back to the default.
+            if !hasSeededShowAllDefault {
+                showAll = appInfo.todoDefaultShowAll
+                hasSeededShowAllDefault = true
+            }
             Task {
                 await appInfo.restorePersistedCookiesIntoStores()
                 await syncCookies()
@@ -190,13 +200,11 @@ struct ToDoPage: View {
                         return
                     }
                 }
-                if !appInfo.isBundledMode {
-                    if let err = await appInfo.loadAllAssignments() {
-                        errorMessage = err
-                    }
+                if let err = await appInfo.loadAllAssignments() {
+                    errorMessage = err
                 }
                 await appInfo.loadResourceAssignmentIds()
-                if !appInfo.isBundledMode && !hasMarkedPastAssignments {
+                if !hasMarkedPastAssignments {
                     appInfo.markPastAssignmentsCompleted()
                     hasMarkedPastAssignments = true
                 }
@@ -230,7 +238,7 @@ struct ShowAssignment: View {
                     if !courseName.isEmpty {
                         Text(courseName)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appInfo.classColor(forCourseName: courseName) ?? .secondary)
                     }
                     if let id = assignment.assignment_id, appInfo.resourceAssignmentIds.contains(id) {
                         Image(systemName: "link")
@@ -247,6 +255,13 @@ struct ShowAssignment: View {
                 }
             }
             Spacer()
+            // Only relevant with "Show All" active (otherwise completed assignments are
+            // filtered out of the list entirely) — flags which of the mixed complete/incomplete
+            // rows are already done.
+            if appInfo.info[assignment.score_id, default: false] {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
             VStack(alignment: .trailing) {
                 if showGrade {
                     if assignment.completion_status == "Not Turned In" {

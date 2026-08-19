@@ -11,11 +11,13 @@ struct Mac_ToDoView: View {
     @AppStorage("hasMarkedPastAssignments") private var hasMarkedPastAssignments = false
 
     @State private var showAll = false
+    @State private var hasSeededShowAllDefault = false
     @State private var showAddAssignment = false
     @State private var showNTIs = false
     @State private var errorMessage = ""
+    @State private var isRefreshing = false
 
-    private let daysAhead = 10
+    private let daysAhead = 40
 
     private var allPairs: [(assignment: Assignment, courseName: String)] {
         let veracross = appInfo.courses.flatMap { course in
@@ -75,23 +77,32 @@ struct Mac_ToDoView: View {
                     })
                 }
                 ForEach(0..<daysAhead, id: \.self) { offset in
-                    Mac_DayColumn(title: columnTitle(for: offset), titleColor: .primary, assignments: assignmentsDue(dayOffset: offset))
+                    let due = assignmentsDue(dayOffset: offset)
+                    if offset == 0 || !due.isEmpty {
+                        Mac_DayColumn(title: columnTitle(for: offset), titleColor: .primary, assignments: due)
+                    }
                 }
             }
             .padding()
         }
         .navigationTitle("To Do")
-        .refreshable {
-            await syncCookies()
-            _ = await appInfo.loadCourses()
-            _ = await appInfo.loadAllAssignments()
-            await appInfo.loadResourceAssignmentIds()
-        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(showAll ? "Hide Done" : "Show All") {
                     withAnimation { showAll.toggle() }
                 }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    if isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .disabled(isRefreshing)
             }
             ToolbarItemGroup(placement: .confirmationAction) {
                 Button("NTIs") { showNTIs = true }
@@ -123,30 +134,49 @@ struct Mac_ToDoView: View {
                     .padding(.top, 8)
             }
         }
-        .onAppear { Task { await loadData() } }
+        .onAppear {
+            // Seed from the synced default exactly once per view instance — see ToDoPage.swift's
+            // identical onAppear comment for why this isn't reseeded on every reappearance.
+            if !hasSeededShowAllDefault {
+                showAll = appInfo.todoDefaultShowAll
+                hasSeededShowAllDefault = true
+            }
+            Task { await loadData() }
+        }
     }
 
     private func loadData() async {
-        if !appInfo.isBundledMode {
-            await appInfo.restorePersistedCookiesIntoStores()
-            await syncCookies()
-        }
+        await appInfo.restorePersistedCookiesIntoStores()
+        await syncCookies()
         if appInfo.courses.isEmpty {
             if let err = await appInfo.loadCourses() {
                 errorMessage = err
                 return
             }
         }
-        if !appInfo.isBundledMode {
-            if let err = await appInfo.loadAllAssignments() {
-                errorMessage = err
-            }
+        if let err = await appInfo.loadAllAssignments() {
+            errorMessage = err
         }
         await appInfo.loadResourceAssignmentIds()
-        if !appInfo.isBundledMode && !hasMarkedPastAssignments {
+        if !hasMarkedPastAssignments {
             appInfo.markPastAssignmentsCompleted()
             hasMarkedPastAssignments = true
         }
+    }
+
+    private func refresh() async {
+        isRefreshing = true
+        errorMessage = ""
+        await appInfo.reconcileCloudSync()
+        await appInfo.restorePersistedCookiesIntoStores()
+        await syncCookies()
+        if let err = await appInfo.loadCourses() {
+            errorMessage = err
+        } else if let err = await appInfo.loadAllAssignments() {
+            errorMessage = err
+        }
+        await appInfo.loadResourceAssignmentIds()
+        isRefreshing = false
     }
 }
 
@@ -173,8 +203,14 @@ private struct Mac_DayColumn: View {
                     .accessibilityLabel("Mark All Past Due as Complete")
                 }
             }
-            ForEach(assignments, id: \.assignment.score_id) { item in
-                Mac_AssignmentCard(assignment: item.assignment, courseName: item.courseName)
+            if assignments.isEmpty {
+                Text("Nothing due today!")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(assignments, id: \.assignment.score_id) { item in
+                    Mac_AssignmentCard(assignment: item.assignment, courseName: item.courseName)
+                }
             }
         }
         .frame(width: 220, alignment: .top)
@@ -190,6 +226,7 @@ private struct Mac_AssignmentCard: View {
     @State private var showDetail = false
 
     private var isComplete: Bool { appInfo.info[assignment.score_id, default: false] }
+    private var courseColor: Color? { appInfo.classColor(forCourseName: courseName) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -207,7 +244,7 @@ private struct Mac_AssignmentCard: View {
             if !courseName.isEmpty {
                 Text(courseName)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(courseColor ?? .secondary)
             }
             if let note = appInfo.assignmentNotes[assignment.score_id], !note.isEmpty {
                 Text(note)
@@ -218,10 +255,17 @@ private struct Mac_AssignmentCard: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.regularMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 8).fill((courseColor ?? .clear).opacity(0.18)))
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isComplete ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1)
+                .stroke(
+                    isComplete ? Color.green.opacity(0.5) : (courseColor ?? Color.clear),
+                    lineWidth: isComplete ? 2.5 : (courseColor != nil ? 2 : 1)
+                )
         )
         .contentShape(Rectangle())
         .onTapGesture { showDetail = true }

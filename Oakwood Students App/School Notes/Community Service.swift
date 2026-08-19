@@ -75,6 +75,12 @@ struct ServiceView: View {
 
     var body: some View {
         List {
+                Section {
+                    Text("Currently you cannot submit forms through this app — we're hoping to enable this within the next month. Feel free to add service and you'll be able to submit it once this is enabled.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
                 // Logged (pending) hours
                 if !appInfo.localServices.isEmpty {
                     Section {
@@ -99,11 +105,15 @@ struct ServiceView: View {
                         HStack {
                             Text("Logged Hours")
                             Spacer()
+                            // Disabled until form submission is actually enabled — see the
+                            // note at the top of this page.
+                            #if false
                             Button(isSelecting ? "Done" : "Select") {
                                 if isSelecting { selectedIDs.removeAll() }
                                 isSelecting.toggle()
                             }
                             .font(.caption).textCase(.none)
+                            #endif
                         }
                     } footer: {
                         if isSelecting && !selectedIDs.isEmpty {

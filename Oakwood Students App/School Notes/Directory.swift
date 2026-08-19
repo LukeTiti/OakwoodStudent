@@ -174,7 +174,10 @@ struct DirectoryPersonRow: View {
 struct DirectoryPersonView: View {
     let person: DirectoryPerson
 
+    @EnvironmentObject var appInfo: AppInfo
+
     @State private var clubRoles: [(clubName: String, role: String)] = []
+    @State private var sharedClasses: [String]? = nil
 
     var body: some View {
         List {
@@ -201,6 +204,24 @@ struct DirectoryPersonView: View {
                 Section("Clubs") {
                     ForEach(clubRoles, id: \.clubName) { entry in
                         Label("\(entry.role), \(entry.clubName)", systemImage: "person.3")
+                    }
+                }
+            }
+
+            Section("Classes Together") {
+                if let sharedClasses {
+                    if sharedClasses.isEmpty {
+                        Text("No classes together").foregroundColor(.secondary)
+                    } else {
+                        ForEach(sharedClasses, id: \.self) { className in
+                            Label(className, systemImage: "book.closed")
+                        }
+                    }
+                } else {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
                     }
                 }
             }
@@ -234,6 +255,9 @@ struct DirectoryPersonView: View {
         .macInsetListStyle()
         .task(id: person.studentEmail) {
             clubRoles = await fetchClubRoles(forEmail: person.studentEmail ?? "")
+        }
+        .task(id: person.studentEmail) {
+            sharedClasses = await fetchSharedClasses(withEmail: person.studentEmail ?? "", courses: appInfo.courses)
         }
     }
 }

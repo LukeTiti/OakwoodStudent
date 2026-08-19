@@ -161,7 +161,10 @@ private struct Mac_DirectoryPersonRow: View {
 private struct Mac_DirectoryPersonView: View {
     let person: DirectoryPerson
 
+    @EnvironmentObject var appInfo: AppInfo
+
     @State private var clubRoles: [(clubName: String, role: String)] = []
+    @State private var sharedClasses: [String]? = nil
 
     var body: some View {
         ScrollView {
@@ -194,6 +197,28 @@ private struct Mac_DirectoryPersonView: View {
                     Divider()
                 }
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Classes Together")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if let sharedClasses {
+                        if sharedClasses.isEmpty {
+                            Text("No classes together").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(sharedClasses, id: \.self) { className in
+                                Label(className, systemImage: "book.closed")
+                            }
+                        }
+                    } else {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                    }
+                }
+                Divider()
+
                 ForEach(person.households) { household in
                     VStack(alignment: .leading, spacing: 10) {
                         if let address = household.address {
@@ -218,6 +243,9 @@ private struct Mac_DirectoryPersonView: View {
         .navigationTitle(person.displayName)
         .task(id: person.studentEmail) {
             clubRoles = await fetchClubRoles(forEmail: person.studentEmail ?? "")
+        }
+        .task(id: person.studentEmail) {
+            sharedClasses = await fetchSharedClasses(withEmail: person.studentEmail ?? "", courses: appInfo.courses)
         }
     }
 }

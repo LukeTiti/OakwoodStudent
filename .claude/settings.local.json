@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:www.oakwoodway.org)"
+      "WebFetch(domain:www.oakwoodway.org)",
+      "mcp__plugin_firebase_firebase__firestore_delete_document"
     ]
   }
 }

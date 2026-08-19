@@ -48,13 +48,15 @@ class AppInfo: ObservableObject {
             if let url = personalCalendarURL {
                 UserDefaults.standard.set(url, forKey: "personalCalendarURL")
             }
-            calendarCloudSync.push(CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
+            let snapshot = CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs)
+            Task { await calendarCloudSync.push(snapshot) }
         }
     }
     @Published var practiceCalendarURLs: [String] = [] {
         didSet {
             UserDefaults.standard.set(practiceCalendarURLs, forKey: "practiceCalendarURLs")
-            calendarCloudSync.push(CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
+            let snapshot = CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs)
+            Task { await calendarCloudSync.push(snapshot) }
         }
     }
 
@@ -62,17 +64,59 @@ class AppInfo: ObservableObject {
     @Published var selectedTab: String = "Grades"
     @Published var pendingAssignmentId: Int? = nil
 
+    // Default state of the To Do page's "Show All"/"Hide Done" toggle — a single LWW value
+    // (not keyed by anything), synced the same way as everything else so it's consistent across
+    // devices. `ToDoPage`/`Mac_ToDoView`'s own `@State private var showAll` seeds from this on
+    // first appear, then behaves as a normal per-session override on top of it.
+    private var todoDefaultShowAllTimestamp: Date = .distantPast
+    @Published var todoDefaultShowAll: Bool = false {
+        didSet {
+            if !isApplyingCloudMerge {
+                todoDefaultShowAllTimestamp = Date()
+            }
+            saveTodoDefaultShowAll()
+        }
+    }
+
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
     @Published var calendarScores: [String: GameScore] = [:]
     @Published var calendarMySignups: [String: [ScoreboardSignup]] = [:]
     @Published var calendarIsLoading = false
+    // Tombstone set for deleted custom assignments, mirroring `deletedServiceIDs`/`localServices`
+    // below — Assignment's `id` is `assignment_description` (a pre-existing quirk, not fixed
+    // here), which is what `SyncedList<Assignment>` tombstones by.
+    private var deletedCustomAssignmentIDs: Set<String> = []
     @Published var customAssignments: [Assignment] = [] {
-        didSet { saveCustomAssignments() }
+        didSet {
+            let removed = Set(oldValue.map(\.id)).subtracting(customAssignments.map(\.id))
+            if !removed.isEmpty { deletedCustomAssignmentIDs.formUnion(removed) }
+            saveCustomAssignments()
+            let snapshot = SyncedList(items: customAssignments, deletedIDs: deletedCustomAssignmentIDs)
+            Task { await customAssignmentsCloudSync.push(snapshot) }
+        }
     }
     private var nextCustomId: Int = -1
+
+    // Set while applying a merged/loaded value back onto `info`/`assignmentNotes`, so their
+    // didSet doesn't mistake "we just received this from CloudKit/disk" for "the user just
+    // edited this" and re-stamp it with a brand new timestamp — which would make every device
+    // think its own reconcile time is the latest edit, defeating last-write-wins entirely.
+    private var isApplyingCloudMerge = false
+
+    // Per-key last-write-wins timestamps backing `info`'s CloudKit sync — see `LWW` in
+    // CloudSync.swift. Needed because a blanket "local wins" merge only fixes the device making
+    // the edit; every other device's own (stale) local value would otherwise always win on its
+    // own reconcile, permanently blocking it from ever adopting a fresher remote change.
+    private var infoTimestamps: [Int: LWW<Bool>] = [:]
     @Published var info: [Int: Bool] = [:] {
         didSet {
+            if !isApplyingCloudMerge {
+                let now = Date()
+                for (key, newValue) in info where oldValue[key] != newValue {
+                    infoTimestamps[key] = LWW(value: newValue, updatedAt: now)
+                }
+            }
             saveAssignmentInfo()
         }
     }
@@ -80,17 +124,59 @@ class AppInfo: ObservableObject {
     // score_id. Deliberately separate from `Assignment.assignment_notes` — that field comes
     // straight off the Veracross API response and gets overwritten on every re-fetch, so a
     // note stored there on a real assignment would silently vanish.
+    private var notesTimestamps: [Int: LWW<String>] = [:]
     @Published var assignmentNotes: [Int: String] = [:] {
         didSet {
+            if !isApplyingCloudMerge {
+                let now = Date()
+                for (key, newValue) in assignmentNotes where oldValue[key] != newValue {
+                    notesTimestamps[key] = LWW(value: newValue, updatedAt: now)
+                }
+                for key in oldValue.keys where assignmentNotes[key] == nil {
+                    notesTimestamps[key] = LWW(value: nil, updatedAt: now)   // tombstone the deletion
+                }
+            }
             saveAssignmentNotes()
+        }
+    }
+
+    // Per-class custom color, keyed by Course.class_id (stable across re-fetches, unlike
+    // enrollment_pk which is optional). iCloud-synced via LWW (see `infoTimestamps`/`notesTimestamps`
+    // for why a per-key timestamp is needed rather than a blanket local/remote-wins rule).
+    private var classColorTimestamps: [String: LWW<CodableColor>] = [:]
+    @Published var classColors: [String: CodableColor] = [:] {
+        didSet {
+            if !isApplyingCloudMerge {
+                let now = Date()
+                for (key, newValue) in classColors where oldValue[key] != newValue {
+                    classColorTimestamps[key] = LWW(value: newValue, updatedAt: now)
+                }
+                for key in oldValue.keys where classColors[key] == nil {
+                    classColorTimestamps[key] = LWW(value: nil, updatedAt: now)   // tombstone the deletion
+                }
+            }
+            saveClassColors()
         }
     }
 
     // Clubs a student follows — sorts them to the top of the clubs list and drives a
     // CloudKit push subscription (see toggleFollowingClub) so the student gets notified
-    // when a followed club posts a new announcement.
+    // when a followed club posts a new announcement. iCloud-synced via LWW (see
+    // `infoTimestamps`/`notesTimestamps`) rather than a plain Set union — a union merge is
+    // additive-only and can never represent "I unfollowed this," so an unfollow would just get
+    // silently resurrected by whichever device still has the old membership on its next reconcile.
+    private var followedClubTimestamps: [String: LWW<Bool>] = [:]
     @Published var followedClubIDs: Set<String> = [] {
         didSet {
+            if !isApplyingCloudMerge {
+                let now = Date()
+                for id in followedClubIDs.subtracting(oldValue) {
+                    followedClubTimestamps[id] = LWW(value: true, updatedAt: now)
+                }
+                for id in oldValue.subtracting(followedClubIDs) {
+                    followedClubTimestamps[id] = LWW(value: nil, updatedAt: now)   // tombstone the unfollow
+                }
+            }
             saveFollowedClubIDs()
         }
     }
@@ -126,20 +212,19 @@ class AppInfo: ObservableObject {
             if let data = try? JSONEncoder().encode(deletedServiceIDs) {
                 UserDefaults.standard.set(data, forKey: "deletedServiceIDs")
             }
-            serviceCloudSync.push(SyncedList(items: localServices, deletedIDs: deletedServiceIDs))
+            let snapshot = SyncedList(items: localServices, deletedIDs: deletedServiceIDs)
+            Task { await serviceCloudSync.push(snapshot) }
         }
     }
 
     // MARK: - iCloud Sync
-    private let assignmentCloudSync = CloudSync<[Int: Bool]>(key: "assignmentInfo") { local, remote in
-        local.merging(remote) { $0 || $1 }   // once complete on any device, stays complete everywhere
-    }
-    private let assignmentNotesCloudSync = CloudSync<[Int: String]>(key: "assignmentNotes") { local, remote in
-        local.merging(remote) { local, _ in local }   // local wins on conflict — most-recently-edited device isn't tracked, so prefer whichever copy is already on this device
-    }
-    private let followedClubsCloudSync = CloudSync<Set<String>>(key: "followedClubIDs") { local, remote in
-        local.union(remote)   // following is additive — no real "conflict" for a set of ids
-    }
+    // Both of these use per-key timestamps (`LWW`, see CloudSync.swift) rather than a blanket
+    // "local wins"/"OR" rule — either of those only fixes the device making the edit, since
+    // every OTHER device's own (stale) local value would otherwise always win on its own
+    // reconcile, permanently blocking it from ever adopting a fresher change from elsewhere.
+    private let assignmentCloudSync = CloudSync<[Int: LWW<Bool>]>(key: "assignmentInfo", merge: mergeLWW)
+    private let assignmentNotesCloudSync = CloudSync<[Int: LWW<String>]>(key: "assignmentNotes", merge: mergeLWW)
+    private let followedClubsCloudSync = CloudSync<[String: LWW<Bool>]>(key: "followedClubIDs", merge: mergeLWW)
     private let lastViewedClubAtCloudSync = CloudSync<[String: Date]>(key: "lastViewedClubAt") { local, remote in
         local.merging(remote) { max($0, $1) }   // whichever device viewed most recently wins per club
     }
@@ -150,6 +235,11 @@ class AppInfo: ObservableObject {
         )
     }
     private let serviceCloudSync = CloudSync<SyncedList<LocalService>>(key: "localServices", merge: SyncedList.merge)
+    private let customAssignmentsCloudSync = CloudSync<SyncedList<Assignment>>(key: "customAssignments", merge: SyncedList.merge)
+    private let classColorsCloudSync = CloudSync<[String: LWW<CodableColor>]>(key: "classColors", merge: mergeLWW)
+    private let todoDefaultShowAllCloudSync = CloudSync<LWW<Bool>>(key: "todoDefaultShowAll") { local, remote in
+        remote.updatedAt > local.updatedAt ? remote : local
+    }
 
     // MARK: Cookie persistence
     // Store cookies as property dictionaries (HTTPCookie.propertyKeys) and a timestamp
@@ -162,14 +252,148 @@ class AppInfo: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    /// Pulls whatever's currently in CloudKit and merges it with local state. Called at launch,
+    /// from the foreground poll loop below, and from the manual refresh buttons on Mac's
+    /// To Do/Calendar views. Each fetch is a real network round trip to CloudKit's servers, not
+    /// a local cache read, so this is what actually detects a remote change.
+    func reconcileCloudSync() async {
+        let (localInfo, localNotes, localClubs, localLastViewed, localCalendar, localServiceList,
+             localCustomAssignments, localClassColors, localShowAllDefault) = await MainActor.run {
+            (infoTimestamps, notesTimestamps, followedClubTimestamps, lastViewedClubAt,
+             CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs),
+             SyncedList(items: localServices, deletedIDs: deletedServiceIDs),
+             SyncedList(items: customAssignments, deletedIDs: deletedCustomAssignmentIDs),
+             classColorTimestamps,
+             LWW(value: todoDefaultShowAll, updatedAt: todoDefaultShowAllTimestamp))
+        }
+
+        async let mergedInfo = assignmentCloudSync.reconcile(local: localInfo)
+        async let mergedNotes = assignmentNotesCloudSync.reconcile(local: localNotes)
+        async let mergedClubs = followedClubsCloudSync.reconcile(local: localClubs)
+        async let mergedLastViewed = lastViewedClubAtCloudSync.reconcile(local: localLastViewed)
+        async let mergedCalendar = calendarCloudSync.reconcile(local: localCalendar)
+        async let mergedServices = serviceCloudSync.reconcile(local: localServiceList)
+        async let mergedCustomAssignments = customAssignmentsCloudSync.reconcile(local: localCustomAssignments)
+        async let mergedClassColors = classColorsCloudSync.reconcile(local: localClassColors)
+        async let mergedShowAllDefault = todoDefaultShowAllCloudSync.reconcile(local: localShowAllDefault)
+
+        let (resolvedInfo, resolvedNotes, resolvedClubs, resolvedLastViewed, resolvedCalendar, resolvedServices,
+             resolvedCustomAssignments, resolvedClassColors, resolvedShowAllDefault) =
+            await (mergedInfo, mergedNotes, mergedClubs, mergedLastViewed, mergedCalendar, mergedServices,
+                   mergedCustomAssignments, mergedClassColors, mergedShowAllDefault)
+
+        await MainActor.run {
+            isApplyingCloudMerge = true
+            infoTimestamps = resolvedInfo
+            info = Dictionary(uniqueKeysWithValues: resolvedInfo.compactMap { key, entry in entry.value.map { (key, $0) } })
+            notesTimestamps = resolvedNotes
+            assignmentNotes = Dictionary(uniqueKeysWithValues: resolvedNotes.compactMap { key, entry in entry.value.map { (key, $0) } })
+            classColorTimestamps = resolvedClassColors
+            classColors = Dictionary(uniqueKeysWithValues: resolvedClassColors.compactMap { key, entry in entry.value.map { (key, $0) } })
+            todoDefaultShowAllTimestamp = resolvedShowAllDefault.updatedAt
+            todoDefaultShowAll = resolvedShowAllDefault.value ?? false
+            followedClubTimestamps = resolvedClubs
+            followedClubIDs = Set(resolvedClubs.compactMap { key, entry in entry.value == true ? key : nil })
+            isApplyingCloudMerge = false
+
+            lastViewedClubAt = resolvedLastViewed
+            personalCalendarURL = resolvedCalendar.personalCalendarURL
+            practiceCalendarURLs = resolvedCalendar.practiceCalendarURLs
+            deletedServiceIDs = resolvedServices.deletedIDs   // set before localServices so its didSet pushes the complete tombstone set
+            localServices = resolvedServices.items
+            deletedCustomAssignmentIDs = resolvedCustomAssignments.deletedIDs   // same ordering reason as deletedServiceIDs/localServices
+            customAssignments = resolvedCustomAssignments.items
+        }
+    }
+
+    private var cloudSyncPollTask: Task<Void, Never>?
+
+    /// Polls CloudKit every ~12s while the app is in the foreground — there's no push mechanism
+    /// this project trusts (see the CloudKit Notification Lab section in Models.swift), so this
+    /// poll is what actually delivers near-real-time sync.
+    func startCloudSyncPolling() {
+        guard cloudSyncPollTask == nil else { return }
+        cloudSyncPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(12))
+                guard !Task.isCancelled else { return }
+                await self?.reconcileCloudSync()
+            }
+        }
+    }
+
+    func stopCloudSyncPolling() {
+        cloudSyncPollTask?.cancel()
+        cloudSyncPollTask = nil
+    }
+
+    /// Wipes every locally-cached and CloudKit-synced value this app manages via CloudSync, both
+    /// locally and on the server. Debug-only escape hatch for when local/cloud state has drifted
+    /// across devices during development. Must be run on EVERY device to actually start clean —
+    /// running it on just one device just gets its now-empty state overwritten by the other
+    /// device's still-populated data on the next reconcile.
+    func resetCloudSyncedData() async {
+        async let deleteInfo: Void = assignmentCloudSync.delete()
+        async let deleteNotes: Void = assignmentNotesCloudSync.delete()
+        async let deleteClubs: Void = followedClubsCloudSync.delete()
+        async let deleteLastViewed: Void = lastViewedClubAtCloudSync.delete()
+        async let deleteCalendar: Void = calendarCloudSync.delete()
+        async let deleteServices: Void = serviceCloudSync.delete()
+        async let deleteCustomAssignments: Void = customAssignmentsCloudSync.delete()
+        async let deleteClassColors: Void = classColorsCloudSync.delete()
+        async let deleteShowAllDefault: Void = todoDefaultShowAllCloudSync.delete()
+        _ = await (deleteInfo, deleteNotes, deleteClubs, deleteLastViewed, deleteCalendar, deleteServices,
+                   deleteCustomAssignments, deleteClassColors, deleteShowAllDefault)
+
+        await MainActor.run {
+            isApplyingCloudMerge = true
+            infoTimestamps = [:]
+            info = [:]
+            notesTimestamps = [:]
+            assignmentNotes = [:]
+            classColorTimestamps = [:]
+            classColors = [:]
+            todoDefaultShowAllTimestamp = .distantPast
+            todoDefaultShowAll = false
+            followedClubTimestamps = [:]
+            followedClubIDs = []
+            isApplyingCloudMerge = false
+
+            lastViewedClubAt = [:]
+            personalCalendarURL = nil
+            practiceCalendarURLs = []
+            localServices = []   // didSet tombstones the removed ids into deletedServiceIDs, so the deletion sticks across devices too
+            customAssignments = []   // didSet tombstones the removed ids into deletedCustomAssignmentIDs, same reason
+        }
+
+        let groupDefaults = UserDefaults(suiteName: appGroupID)
+        groupDefaults?.removeObject(forKey: "assignmentInfo")
+        groupDefaults?.removeObject(forKey: "assignmentInfoTimestamps")
+        groupDefaults?.removeObject(forKey: "assignmentNotes")
+        groupDefaults?.removeObject(forKey: "assignmentNotesTimestamps")
+        groupDefaults?.removeObject(forKey: "followedClubIDs")
+        groupDefaults?.removeObject(forKey: "followedClubTimestamps")
+        groupDefaults?.removeObject(forKey: "lastViewedClubAt")
+        groupDefaults?.removeObject(forKey: "classColors")
+        groupDefaults?.removeObject(forKey: "classColorsTimestamps")
+        UserDefaults.standard.removeObject(forKey: "personalCalendarURL")
+        UserDefaults.standard.removeObject(forKey: "practiceCalendarURLs")
+        UserDefaults.standard.removeObject(forKey: "todoDefaultShowAll")
+        UserDefaults.standard.removeObject(forKey: "todoDefaultShowAllTimestamp")
+        // Not clearing "deletedServiceIDs"/"serviceToSubmit" or "customAssignments"/"deletedCustomAssignmentIDs"/
+        // "nextCustomId" here — the `localServices = []`/`customAssignments = []` assignments above already
+        // persisted their correct (tombstoned) values via their didSets.
+    }
+
     init() {
         loadCachedCourses()
         loadAssignmentInfo()
         loadAssignmentNotes()
         loadFollowedClubIDs()
         loadLastViewedClubAt()
-        loadBundledGrades()
+        loadClassColors()
         loadCustomAssignments()
+        loadTodoDefaultShowAll()
         loadCookies()
         loadGoogleLogin()
         personalCalendarURL = UserDefaults.standard.string(forKey: "personalCalendarURL")
@@ -183,38 +407,11 @@ class AppInfo: ObservableObject {
             localServices = decoded
         }
 
-        // Reconcile local data with iCloud now that everything's loaded locally
-        info = assignmentCloudSync.reconcile(local: info)
-        assignmentNotes = assignmentNotesCloudSync.reconcile(local: assignmentNotes)
-        followedClubIDs = followedClubsCloudSync.reconcile(local: followedClubIDs)
-        lastViewedClubAt = lastViewedClubAtCloudSync.reconcile(local: lastViewedClubAt)
-        let mergedCalendar = calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: personalCalendarURL, practiceCalendarURLs: practiceCalendarURLs))
-        personalCalendarURL = mergedCalendar.personalCalendarURL
-        practiceCalendarURLs = mergedCalendar.practiceCalendarURLs
-        let mergedServices = serviceCloudSync.reconcile(local: SyncedList(items: localServices, deletedIDs: deletedServiceIDs))
-        deletedServiceIDs = mergedServices.deletedIDs   // set before localServices so its didSet pushes the complete tombstone set
-        localServices = mergedServices.items
-
-        // Re-reconcile whenever iCloud reports a change that originated elsewhere.
-        // Local .set() calls never trigger this notification, so there's no feedback loop with push().
-        NotificationCenter.default.addObserver(
-            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-            object: NSUbiquitousKeyValueStore.default,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.info = self.assignmentCloudSync.reconcile(local: self.info)
-            self.assignmentNotes = self.assignmentNotesCloudSync.reconcile(local: self.assignmentNotes)
-            self.followedClubIDs = self.followedClubsCloudSync.reconcile(local: self.followedClubIDs)
-            self.lastViewedClubAt = self.lastViewedClubAtCloudSync.reconcile(local: self.lastViewedClubAt)
-            let merged = self.calendarCloudSync.reconcile(local: CalendarSubscriptions(personalCalendarURL: self.personalCalendarURL, practiceCalendarURLs: self.practiceCalendarURLs))
-            self.personalCalendarURL = merged.personalCalendarURL
-            self.practiceCalendarURLs = merged.practiceCalendarURLs
-            let mergedServices = self.serviceCloudSync.reconcile(local: SyncedList(items: self.localServices, deletedIDs: self.deletedServiceIDs))
-            self.deletedServiceIDs = mergedServices.deletedIDs
-            self.localServices = mergedServices.items
-        }
-        NSUbiquitousKeyValueStore.default.synchronize()
+        // Reconcile local data with CloudKit now that everything's loaded locally. Fire-and-forget
+        // since init() can't be async — the foreground poll loop (started from School_NotesApp's
+        // .onAppear) picks up from here.
+        print("[CloudSync] launch reconcile starting")
+        Task { [weak self] in await self?.reconcileCloudSync() }
 
         // If already signed in from a previous session, save FCM token now
         #if os(iOS)
@@ -255,67 +452,62 @@ class AppInfo: ObservableObject {
         }
     }
 
-    let isBundledMode: Bool = Bundle.main.url(forResource: "load_data", withExtension: "json") != nil
-
-    private func loadBundledGrades() {
-        guard let coursesURL = Bundle.main.url(forResource: "load_data", withExtension: "json"),
-              let coursesData = try? Data(contentsOf: coursesURL),
-              let response = try? JSONDecoder().decode(CoursesResponse.self, from: coursesData) else { return }
-
-        var loadedCourses = response.courses
-        for i in loadedCourses.indices {
-            let name = i == 0 ? "assignments" : "assignments\(i)"
-            guard let url = Bundle.main.url(forResource: name, withExtension: "json"),
-                  let data = try? Data(contentsOf: url),
-                  let aResponse = try? JSONDecoder().decode(AssignmentResponse.self, from: data) else { continue }
-            let byID = Dictionary(grouping: aResponse.attachments ?? []) { $0.assignment_id }
-            var assignments = aResponse.assignments
-            for j in assignments.indices {
-                if let id = assignments[j].assignment_id { assignments[j].attachments = byID[id] }
-            }
-            loadedCourses[i].assignments = assignments
-        }
-        courses = loadedCourses
-
-        // One-time migration: clear any info values written by old seeding logic.
-        // After this, info only contains explicit user toggles.
-        let migrateKey = "bundledInfoMigratedV1"
-        if !UserDefaults.standard.bool(forKey: migrateKey) {
-            info = [:]
-            UserDefaults.standard.set(true, forKey: migrateKey)
-        }
-
-        let capturedInfo = info
-        if #available(iOS 27.0, macOS 27.0, *) {
-            Task { await AppInfo.indexEntities(courses: loadedCourses, info: capturedInfo) }
-        }
-    }
-
     private func saveAssignmentInfo() {
         if let encoded = try? JSONEncoder().encode(info) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfo")
         }
-        assignmentCloudSync.push(info)
+        if let encoded = try? JSONEncoder().encode(infoTimestamps) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfoTimestamps")
+        }
+        let snapshot = infoTimestamps
+        Task { await assignmentCloudSync.push(snapshot) }
     }
 
     private func loadAssignmentInfo() {
+        isApplyingCloudMerge = true
+        defer { isApplyingCloudMerge = false }
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfo"),
            let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
             info = decoded
         }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfoTimestamps"),
+           let decoded = try? JSONDecoder().decode([Int: LWW<Bool>].self, from: data) {
+            infoTimestamps = decoded
+        }
     }
 
+    private var assignmentNotesPushTask: Task<Void, Never>?
+
+    /// Local persistence happens instantly on every keystroke, but the iCloud push is
+    /// debounced — pushing on every character while typing a note causes iCloud to
+    /// throttle/coalesce the rapid writes, which can delay the *final* text reaching
+    /// other devices more than just waiting for a pause in typing and sending once.
     private func saveAssignmentNotes() {
         if let encoded = try? JSONEncoder().encode(assignmentNotes) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentNotes")
         }
-        assignmentNotesCloudSync.push(assignmentNotes)
+        if let encoded = try? JSONEncoder().encode(notesTimestamps) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentNotesTimestamps")
+        }
+        assignmentNotesPushTask?.cancel()
+        let snapshot = notesTimestamps
+        assignmentNotesPushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self else { return }
+            await self.assignmentNotesCloudSync.push(snapshot)
+        }
     }
 
     private func loadAssignmentNotes() {
+        isApplyingCloudMerge = true
+        defer { isApplyingCloudMerge = false }
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotes"),
            let decoded = try? JSONDecoder().decode([Int: String].self, from: data) {
             assignmentNotes = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotesTimestamps"),
+           let decoded = try? JSONDecoder().decode([Int: LWW<String>].self, from: data) {
+            notesTimestamps = decoded
         }
     }
 
@@ -330,19 +522,78 @@ class AppInfo: ObservableObject {
         }
     }
 
+    // MARK: - Class Colors
+
+    private func saveClassColors() {
+        if let encoded = try? JSONEncoder().encode(classColors) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "classColors")
+        }
+        if let encoded = try? JSONEncoder().encode(classColorTimestamps) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "classColorsTimestamps")
+        }
+        let snapshot = classColorTimestamps
+        Task { await classColorsCloudSync.push(snapshot) }
+    }
+
+    private func loadClassColors() {
+        isApplyingCloudMerge = true
+        defer { isApplyingCloudMerge = false }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "classColors"),
+           let decoded = try? JSONDecoder().decode([String: CodableColor].self, from: data) {
+            classColors = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "classColorsTimestamps"),
+           let decoded = try? JSONDecoder().decode([String: LWW<CodableColor>].self, from: data) {
+            classColorTimestamps = decoded
+        }
+    }
+
+    /// The student-chosen color for a course, or nil if they've never set one — callers should
+    /// treat nil as "no border/tint," not fall back to a default color.
+    func classColor(for course: Course) -> Color? {
+        classColors[course.class_id]?.color
+    }
+
+    /// Same lookup, but by course name — for call sites (like Mac_ToDoView's assignment/course
+    /// name pairs) that only carry the course's `class_name`, not the `Course` itself. Matches
+    /// against the first course in `courses` with that name.
+    func classColor(forCourseName name: String) -> Color? {
+        guard let course = courses.first(where: { $0.class_name == name }) else { return nil }
+        return classColor(for: course)
+    }
+
+    /// Sets (or clears, if `color` is nil) the custom color for a course.
+    func setClassColor(_ color: Color?, for course: Course) {
+        if let color {
+            classColors[course.class_id] = CodableColor(color: color)
+        } else {
+            classColors.removeValue(forKey: course.class_id)
+        }
+    }
+
     // MARK: - Followed Clubs
 
     private func saveFollowedClubIDs() {
         if let encoded = try? JSONEncoder().encode(followedClubIDs) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "followedClubIDs")
         }
-        followedClubsCloudSync.push(followedClubIDs)
+        if let encoded = try? JSONEncoder().encode(followedClubTimestamps) {
+            UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "followedClubTimestamps")
+        }
+        let snapshot = followedClubTimestamps
+        Task { await followedClubsCloudSync.push(snapshot) }
     }
 
     private func loadFollowedClubIDs() {
+        isApplyingCloudMerge = true
+        defer { isApplyingCloudMerge = false }
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
            let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
             followedClubIDs = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubTimestamps"),
+           let decoded = try? JSONDecoder().decode([String: LWW<Bool>].self, from: data) {
+            followedClubTimestamps = decoded
         }
     }
 
@@ -368,7 +619,8 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(lastViewedClubAt) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "lastViewedClubAt")
         }
-        lastViewedClubAtCloudSync.push(lastViewedClubAt)
+        let snapshot = lastViewedClubAt
+        Task { await lastViewedClubAtCloudSync.push(snapshot) }
     }
 
     private func loadLastViewedClubAt() {
@@ -415,15 +667,46 @@ class AppInfo: ObservableObject {
         if let data = try? JSONEncoder().encode(customAssignments) {
             UserDefaults.standard.set(data, forKey: "customAssignments")
         }
+        if let data = try? JSONEncoder().encode(deletedCustomAssignmentIDs) {
+            UserDefaults.standard.set(data, forKey: "deletedCustomAssignmentIDs")
+        }
         UserDefaults.standard.set(nextCustomId, forKey: "nextCustomId")
     }
 
     private func loadCustomAssignments() {
+        // Load the tombstone set BEFORE `customAssignments` — its didSet snapshots
+        // `deletedCustomAssignmentIDs` into the very first push, so loading out of order would
+        // push a stale (empty) tombstone set right after launch. Same ordering `localServices`
+        // relies on in `init()`.
+        if let data = UserDefaults.standard.data(forKey: "deletedCustomAssignmentIDs"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            deletedCustomAssignmentIDs = decoded
+        }
         if let data = UserDefaults.standard.data(forKey: "customAssignments"),
            let decoded = try? JSONDecoder().decode([Assignment].self, from: data) {
             customAssignments = decoded
         }
         nextCustomId = UserDefaults.standard.object(forKey: "nextCustomId") as? Int ?? -1
+    }
+
+    // MARK: - To Do Default Show-All Setting
+
+    private func saveTodoDefaultShowAll() {
+        UserDefaults.standard.set(todoDefaultShowAll, forKey: "todoDefaultShowAll")
+        UserDefaults.standard.set(todoDefaultShowAllTimestamp.timeIntervalSince1970, forKey: "todoDefaultShowAllTimestamp")
+        let snapshot = LWW(value: todoDefaultShowAll, updatedAt: todoDefaultShowAllTimestamp)
+        Task { await todoDefaultShowAllCloudSync.push(snapshot) }
+    }
+
+    private func loadTodoDefaultShowAll() {
+        isApplyingCloudMerge = true
+        defer { isApplyingCloudMerge = false }
+        if UserDefaults.standard.object(forKey: "todoDefaultShowAll") != nil {
+            todoDefaultShowAll = UserDefaults.standard.bool(forKey: "todoDefaultShowAll")
+        }
+        if let ts = UserDefaults.standard.object(forKey: "todoDefaultShowAllTimestamp") as? TimeInterval {
+            todoDefaultShowAllTimestamp = Date(timeIntervalSince1970: ts)
+        }
     }
 
     func addCustomAssignment(courseName: String, description: String, dueDate: Date, type: String, notes: String) {

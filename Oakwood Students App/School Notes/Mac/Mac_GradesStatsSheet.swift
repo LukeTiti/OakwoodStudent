@@ -52,12 +52,11 @@ struct Mac_StatsSheet: View {
         appInfo.courses.compactMap { course in
             let nameLower = course.class_name.lowercased()
             let sportsAndNonAcademic = ["independent pe", "community meeting", "assembly",
-                "study period", "volleyball", "basketball", "tennis", "badminton",
+                "advisory", "study period", "volleyball", "basketball", "tennis", "badminton",
                 "soccer", "swimming", "track", "cross country"]
             guard !sportsAndNonAcademic.contains(where: { nameLower.contains($0) }),
                   !(nameLower.contains("hs") && nameLower.contains("team")) else { return nil }
             let weighted = isWeighted(course.class_name)
-            let hasAssignments = !(course.assignments ?? []).isEmpty
 
             let letter: String
             var pts: Double
@@ -68,13 +67,10 @@ struct Mac_StatsSheet: View {
                 // Has a real grade — use it
                 letter = l.trimmingCharacters(in: .whitespaces)
                 pts = p
-            } else if !hasAssignments {
-                // No assignments yet — assume A (100%)
+            } else {
+                // No letter grade yet (whether or not assignments have been posted) — assume A
                 letter = "A"
                 pts = 4.0
-            } else {
-                // Has assignments but no letter grade yet — skip
-                return nil
             }
 
             if weighted { pts += 1 }
@@ -133,12 +129,12 @@ struct Mac_StatsSheet: View {
 
                 Section("Documents") {
                     let pk = appInfo.personPK ?? 39950
-                    NavigationLink(destination: PDFViewer(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=2&key=_")!, appInfo: appInfo)
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=2&key=_")!)
                         .navigationTitle("Attendance – Sem 1")) {
                         Label("Attendance – Semester 1", systemImage: "doc.text")
                     }
                     .macRowPadding()
-                    NavigationLink(destination: PDFViewer(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=6&key=_")!, appInfo: appInfo)
+                    NavigationLink(destination: DocumentWebView(url: URL(string: "https://documents.veracross.com/oakwood/attendance/\(pk)?grading_period=6&key=_")!)
                         .navigationTitle("Attendance – Sem 2")) {
                         Label("Attendance – Semester 2", systemImage: "doc.text")
                     }

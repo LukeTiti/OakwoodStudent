@@ -179,6 +179,23 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             #if os(macOS)
+            if viewModel.items.isEmpty {
+                ContentUnavailableView(
+                    "Nothing Here Yet",
+                    systemImage: "newspaper",
+                    description: Text("Come back on Thursday at 5!")
+                )
+                .navigationTitle("Inside Scoop")
+                .toolbar { scoopToolbar }
+                .refreshable { await viewModel.fetchScoop(tag: tag) }
+                .onAppear {
+                    Task {
+                        await viewModel.fetchScoop(tag: tag)
+                        banners = (try? await FirebaseService.shared.fetchBanners()) ?? []
+                        dismissedBanners = []
+                    }
+                }
+            } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 350), spacing: 16)], spacing: 16) {
                     ForEach(viewModel.items) { item in
@@ -238,6 +255,7 @@ struct HomeView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) { bannerOverlay }
+            }
             #else
             List {
                 let visible = banners.filter { !dismissedBanners.contains($0.message) }
@@ -251,14 +269,21 @@ struct HomeView: View {
                         }
                     }
                 }
-                Section {
-                    ForEach(todayItems + otherItems) { item in
-                        NavigationLink(destination: EventView(events: item)) {
-                            ScoopRow(item: item, showBadge: hasTodayDate(in: item.title))
-                        }
+                if viewModel.items.isEmpty {
+                    Section {
+                        Text("Nothing here yet — come back on Thursday at 5!")
+                            .foregroundColor(.secondary)
                     }
-                } header: {
-                    Text("Issue: \(articlePublicationDate.formatted(.dateTime.month(.wide).day().year()))")
+                } else {
+                    Section {
+                        ForEach(todayItems + otherItems) { item in
+                            NavigationLink(destination: EventView(events: item)) {
+                                ScoopRow(item: item, showBadge: hasTodayDate(in: item.title))
+                            }
+                        }
+                    } header: {
+                        Text("Issue: \(articlePublicationDate.formatted(.dateTime.month(.wide).day().year()))")
+                    }
                 }
             }
             .navigationTitle("Inside Scoop")

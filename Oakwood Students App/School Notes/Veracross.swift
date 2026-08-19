@@ -42,6 +42,7 @@ struct VeracrossGradesView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(course.class_name)
                                         .font(.headline)
+                                        .foregroundStyle(appInfo.classColor(for: course) ?? .primary)
                                         .lineLimit(2)
                                     if unreadCount > 0 {
                                         Text("\(unreadCount) unread assignment\(unreadCount == 1 ? "" : "s")")
@@ -130,6 +131,10 @@ struct CourseView: View {
     @State private var errorMessage: String?
     @State var course: Course?
     @State private var showGradeDetail = false
+    @State private var showDirectory = false
+    @State private var isLoadingRoster = false
+    @State private var hasLoadedRoster = false
+    @State private var rosterPeople: [DirectoryPerson] = []
     @EnvironmentObject var appInfo: AppInfo
 
     private var liveCourse: Course? {
@@ -156,7 +161,7 @@ struct CourseView: View {
             }
 
             Section(header: Text("To Do (\(todoCount))")) {
-                ForEach(assignments.filter { appInfo.info[$0.score_id, default: false] == false }, id: \.score_id) { assignment in
+                ForEach(assignments.filter { appInfo.info[$0.score_id, default: false] == false }.reversed(), id: \.score_id) { assignment in
                     NavigationLink(destination: AssignmentDetailView(assignment: assignment, courseName: course?.class_name ?? "")) {
                         ShowAssignment(assignment: assignment)
                     }
@@ -177,6 +182,14 @@ struct CourseView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
+                    showDirectory = true
+                } label: {
+                    Image(systemName: "person.2")
+                }
+                .disabled(course == nil)
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
                     showGradeDetail = true
                 } label: {
                     Image(systemName: "chart.bar.fill")
@@ -189,8 +202,48 @@ struct CourseView: View {
                     .environmentObject(appInfo)
             }
         }
+        .sheet(isPresented: $showDirectory) {
+            NavigationStack {
+                Group {
+                    if isLoadingRoster {
+                        ProgressView("Loading roster…")
+                    } else if rosterPeople.isEmpty {
+                        ContentUnavailableView(
+                            "Couldn't Load Class Roster",
+                            systemImage: "person.2.slash",
+                            description: Text("Check the Xcode console for [ClassRoster] diagnostic output.")
+                        )
+                    } else {
+                        List(rosterPeople) { person in
+                            ClassRosterPersonRow(person: person)
+                        }
+                    }
+                }
+                .navigationTitle("Directory")
+                .inlineNavigationBarTitle()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showDirectory = false }
+                    }
+                }
+            }
+            .onAppear {
+                guard !hasLoadedRoster, let course = course else { return }
+                hasLoadedRoster = true
+                isLoadingRoster = true
+                Task {
+                    await appInfo.restorePersistedCookiesIntoStores()
+                    await syncCookies()
+                    let people = await ClassRosterCache.shared.roster(for: course)
+                    await MainActor.run {
+                        rosterPeople = people
+                        isLoadingRoster = false
+                    }
+                }
+            }
+        }
         .onAppear {
-            guard let course = course, !appInfo.isBundledMode else { return }
+            guard let course = course else { return }
             let courseID = course.enrollment_pk ?? 0
             Task {
                 await syncCookies()
@@ -202,6 +255,31 @@ struct CourseView: View {
                 await appInfo.loadResourceAssignmentIds()
             }
         }
+    }
+}
+
+// MARK: - Class Roster Row
+
+private struct ClassRosterPersonRow: View {
+    let person: DirectoryPerson
+
+    var body: some View {
+        HStack(spacing: 12) {
+            DirectoryPhoto(urlString: person.photoURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.displayName).font(.body)
+                HStack(spacing: 6) {
+                    if !person.grade.isEmpty {
+                        Text(person.grade).font(.caption).foregroundColor(.secondary)
+                    }
+                    if let email = person.studentEmail {
+                        Text(email).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .macRowPadding()
     }
 }
 
@@ -294,26 +372,6 @@ struct GradeShareCard: View {
 }
 
 
-// MARK: - Document Web View (zoomable, shares Veracross cookie store)
-
-#if os(iOS)
-struct DocumentWebView: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.scrollView.minimumZoomScale = 1.0
-        webView.scrollView.maximumZoomScale = 5.0
-        webView.load(URLRequest(url: url))
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-}
-#endif
-
 // MARK: - Stats Sheet
 struct StatsSheet: View {
     @EnvironmentObject var appInfo: AppInfo
@@ -361,12 +419,11 @@ struct StatsSheet: View {
         appInfo.courses.compactMap { course in
             let nameLower = course.class_name.lowercased()
             let sportsAndNonAcademic = ["independent pe", "community meeting", "assembly",
-                "study period", "volleyball", "basketball", "tennis", "badminton",
+                "advisory", "study period", "volleyball", "basketball", "tennis", "badminton",
                 "soccer", "swimming", "track", "cross country"]
             guard !sportsAndNonAcademic.contains(where: { nameLower.contains($0) }),
                   !(nameLower.contains("hs") && nameLower.contains("team")) else { return nil }
             let weighted = isWeighted(course.class_name)
-            let hasAssignments = !(course.assignments ?? []).isEmpty
 
             let letter: String
             var pts: Double
@@ -377,13 +434,10 @@ struct StatsSheet: View {
                 // Has a real grade — use it
                 letter = l.trimmingCharacters(in: .whitespaces)
                 pts = p
-            } else if !hasAssignments {
-                // No assignments yet — assume A (100%)
+            } else {
+                // No letter grade yet (whether or not assignments have been posted) — assume A
                 letter = "A"
                 pts = 4.0
-            } else {
-                // Has assignments but no letter grade yet — skip
-                return nil
             }
 
             if weighted { pts += 1 }

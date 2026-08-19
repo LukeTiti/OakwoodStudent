@@ -14,7 +14,7 @@ struct Mac_CalendarView: View {
         return cats
     }()
 
-    private let daysBack = 3
+    private let daysBack = 0
     private let minDaysAhead = 14
 
     /// Always shows at least `minDaysAhead` days out, but extends further to cover
@@ -89,10 +89,24 @@ struct Mac_CalendarView: View {
             }
         }
         .navigationTitle("Calendar")
-        .refreshable { await appInfo.loadAllCalendarEvents() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button { showingFilter = true } label: { Image(systemName: filterIconName) }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    Task {
+                        await appInfo.reconcileCloudSync()
+                        await appInfo.loadAllCalendarEvents()
+                    }
+                } label: {
+                    if appInfo.calendarIsLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .disabled(appInfo.calendarIsLoading)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button { showAddCalendar = true } label: {

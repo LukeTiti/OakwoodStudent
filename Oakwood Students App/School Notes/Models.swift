@@ -122,6 +122,39 @@ func assignmentTypeColor(_ type: String) -> Color {
     }
 }
 
+// MARK: - Class Color
+//
+// SwiftUI's Color isn't reliably Codable across this project's deployment target, so a
+// custom per-class color (see AppInfo.classColors) is stored as plain RGBA components
+// instead — converts cleanly to/from Color on both iOS (UIColor) and macOS (NSColor).
+struct CodableColor: Codable, Equatable {
+    var red: Double
+    var green: Double
+    var blue: Double
+    var alpha: Double
+
+    var color: Color { Color(red: red, green: green, blue: blue, opacity: alpha) }
+
+    init(red: Double, green: Double, blue: Double, alpha: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+
+    init(color: Color) {
+        #if os(iOS)
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        red = Double(r); green = Double(g); blue = Double(b); alpha = Double(a)
+        #elseif os(macOS)
+        let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
+        red = Double(ns.redComponent); green = Double(ns.greenComponent); blue = Double(ns.blueComponent); alpha = Double(ns.alphaComponent)
+        #endif
+    }
+}
+
 // MARK: - Onboarding Shared Data
 //
 // Shared between OnboardingView.swift (iOS, platform-filtered out of the macOS target)
@@ -474,6 +507,17 @@ extension View {
             self
         }
     }
+
+    /// Tints a List row with a class's chosen color (see AppInfo.classColor) — applied after
+    /// `unreadRowBackground` at call sites so it takes priority when both would otherwise apply.
+    @ViewBuilder
+    func classColorRowBackground(_ color: Color?) -> some View {
+        if let color {
+            self.listRowBackground(color.opacity(0.18))
+        } else {
+            self
+        }
+    }
 }
 
 // MARK: - Link Detection
@@ -784,6 +828,112 @@ func downloadPDFForSharing(url: URL, appInfo: AppInfo) async -> URL? {
     }
 }
 
+// MARK: - Document Web View (zoomable, shares Veracross cookie store)
+// Moved here from Veracross.swift (which is iOS-only platform-filtered in the Xcode
+// project, so a macOS variant declared there would never actually compile into the Mac
+// target — same class of bug as the earlier Color.oakwoodGreenLight one). Loads the URL
+// directly in a real WKWebView rather than fetching bytes and forcing them through
+// PDFDocument(data:) (see PDFViewer below) — some Veracross document endpoints (e.g.
+// attendance) don't return clean PDF bytes to a bare URLSession fetch outside a real
+// browser/navigation context, but render fine when actually loaded as a web page.
+// Best-effort: some Veracross pages (e.g. a specific class's directory, which lives on
+// classes.veracross.com — a different subdomain from portals.veracross.com, where we
+// actually log in) return a bare "not found" when hit directly, cold, with just copied
+// cookies — they seem to need an actual in-session click-through from an authenticated
+// portals.veracross.com page to establish, rather than being reachable as a standalone
+// authenticated URL. When `autoClickLinkContaining`/`matchHint` are set, this loads `url`
+// (a known-good portals.veracross.com page) and then searches the loaded page for an <a>
+// whose href contains `autoClickLinkContaining` and whose nearby row text contains
+// `matchHint` (case-insensitive), clicking it programmatically to trigger a real
+// in-session navigation to the target page. This is a heuristic over unknown page
+// structure, not a guaranteed match.
+class DocumentWebViewCoordinator: NSObject, WKNavigationDelegate {
+    let autoClickLinkContaining: String?
+    let matchHint: String?
+    private var hasAttemptedClick = false
+
+    init(autoClickLinkContaining: String?, matchHint: String?) {
+        self.autoClickLinkContaining = autoClickLinkContaining
+        self.matchHint = matchHint
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !hasAttemptedClick, let linkSubstring = autoClickLinkContaining, let hint = matchHint else { return }
+        hasAttemptedClick = true
+        let escapedLink = linkSubstring.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let escapedHint = hint.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let js = """
+        (function() {
+            var links = Array.from(document.querySelectorAll('a[href*="\(escapedLink)"]'));
+            var hint = '\(escapedHint)'.toLowerCase();
+            for (var i = 0; i < links.length; i++) {
+                // Climb to the enclosing course list item, not just the immediate parent —
+                // the course name lives in a sibling div (course-list-class), not inside the
+                // same website-links wrapper as the link itself.
+                var row = links[i].closest('li') || links[i].closest('.ae-grid') || links[i].parentElement;
+                var text = ((row ? row.innerText : links[i].innerText) || '').toLowerCase();
+                if (text.indexOf(hint) !== -1) {
+                    links[i].removeAttribute('target');
+                    links[i].click();
+                    return true;
+                }
+            }
+            return false;
+        })();
+        """
+        webView.evaluateJavaScript(js) { result, error in
+            if let error { print("[DocumentWebView] auto-click JS failed: \(error)") }
+            else { print("[DocumentWebView] auto-click matched a link: \(result ?? false)") }
+        }
+    }
+}
+
+#if os(iOS)
+struct DocumentWebView: UIViewRepresentable {
+    let url: URL
+    var autoClickLinkContaining: String? = nil
+    var matchHint: String? = nil
+
+    func makeCoordinator() -> DocumentWebViewCoordinator {
+        DocumentWebViewCoordinator(autoClickLinkContaining: autoClickLinkContaining, matchHint: matchHint)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.scrollView.minimumZoomScale = 1.0
+        webView.scrollView.maximumZoomScale = 5.0
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+}
+#elseif os(macOS)
+struct DocumentWebView: NSViewRepresentable {
+    let url: URL
+    var autoClickLinkContaining: String? = nil
+    var matchHint: String? = nil
+
+    func makeCoordinator() -> DocumentWebViewCoordinator {
+        DocumentWebViewCoordinator(autoClickLinkContaining: autoClickLinkContaining, matchHint: matchHint)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {}
+}
+#endif
+
 // MARK: - PDF Viewer
 
 #if os(iOS)
@@ -997,6 +1147,21 @@ func fetchClubRoles(forEmail email: String) async -> [(clubName: String, role: S
         club.officers.filter { $0.email.lowercased() == email.lowercased() }
             .map { (clubName: club.name, role: $0.role) }
     }
+}
+
+/// Every one of the current student's own classes (from `courses`) that also has `email`
+/// enrolled, matched by studentEmail (case-insensitive) — same matching convention as
+/// fetchClubRoles. Best-effort: returns empty on any failure, and if `email` is empty.
+func fetchSharedClasses(withEmail email: String, courses: [Course]) async -> [String] {
+    guard !email.isEmpty else { return [] }
+    var shared: [String] = []
+    for course in courses {
+        let roster = await ClassRosterCache.shared.roster(for: course)
+        if roster.contains(where: { ($0.studentEmail ?? "").caseInsensitiveCompare(email) == .orderedSame }) {
+            shared.append(course.class_name)
+        }
+    }
+    return shared
 }
 
 // MARK: - Club Theme
@@ -1263,8 +1428,6 @@ func checkForNewClubAnnouncements() async {
           let followedClubIDs = try? JSONDecoder().decode(Set<String>.self, from: data),
           !followedClubIDs.isEmpty else { return }
 
-    var lastSeen = (UserDefaults(suiteName: appGroupID)?.dictionary(forKey: "lastSeenClubActivity") as? [String: TimeInterval]) ?? [:]
-
     for clubId in followedClubIDs {
         guard let record = try? await CKContainer.default().publicCloudDatabase.record(for: CKRecord.ID(recordName: "club-activity-\(clubId)")),
               let postedAt = record["postedAt"] as? Date else { continue }
@@ -1273,10 +1436,16 @@ func checkForNewClubAnnouncements() async {
         let announcementTitle = record["announcementTitle"] as? String ?? "New announcement"
         let authorName = record["authorName"] as? String ?? ""
 
+        // Re-read fresh each iteration (not hoisted before the loop) so a concurrent
+        // invocation of this same function (e.g. background refresh and a push waking
+        // the app at nearly the same moment) can't clobber another club's already-persisted
+        // dedup state with a stale in-memory copy.
+        var lastSeen = (UserDefaults(suiteName: appGroupID)?.dictionary(forKey: "lastSeenClubActivity") as? [String: TimeInterval]) ?? [:]
         let lastSeenTime = lastSeen[clubId].map { Date(timeIntervalSince1970: $0) } ?? .distantPast
         guard postedAt > lastSeenTime else { continue }
 
         lastSeen[clubId] = postedAt.timeIntervalSince1970
+        UserDefaults(suiteName: appGroupID)?.set(lastSeen, forKey: "lastSeenClubActivity")
 
         let content = UNMutableNotificationContent()
         content.title = clubName
@@ -1291,8 +1460,6 @@ func checkForNewClubAnnouncements() async {
             if let error { print("[ClubActivity] Failed to send local notification: \(error)") }
         }
     }
-
-    UserDefaults(suiteName: appGroupID)?.set(lastSeen, forKey: "lastSeenClubActivity")
     #endif
 }
 
@@ -1821,6 +1988,223 @@ private func parseDirectoryEntry(_ entry: Element) -> DirectoryPerson? {
     }()
 
     return DirectoryPerson(name: name, grade: grade, photoURL: photoURL, studentEmail: studentEmail, households: households)
+}
+
+// MARK: - Class Roster Scraping
+//
+// Fetches a single class's roster (Directory tab), which lives at
+// classes.veracross.com/oakwood/course/{class_id}/website/directory — a different subdomain
+// from portals.veracross.com, where the app actually authenticates. Two fetch paths:
+//   1. Cheap path: a direct authenticated URLSession GET straight at that URL.
+//   2. Fallback: reuses the exact click-through mechanism proven to work for the webview
+//      version (load the authenticated portal overview page, find the matching course's
+//      Directory link by nearby text, strip target="_blank", click it, wait for the
+//      resulting navigation), except here it's driven by an off-screen, headless WKWebView
+//      and awaited, then the resulting page's HTML is pulled out and parsed with SwiftSoup
+//      instead of being left on screen.
+//
+// Confirmed via a real console capture: the class directory page uses the exact same
+// `div.DirectoryEntries > div.directory-Entry` component as the main school Directory search
+// (fetchDirectoryPage1 above) — same directory-Entry_Header/PersonPhoto--square/HouseholdSection
+// class names — so this reuses parseDirectoryEntry directly instead of a separate generic
+// parser, producing real DirectoryPerson results (name, grade, photo, households) instead of
+// a stripped-down custom model.
+
+/// Per-session cache of class rosters, keyed by class_id. Without this, viewing multiple
+/// directory profiles would each independently re-fetch every one of the student's classes'
+/// rosters from scratch, which is expensive (the click-through fallback path involves a real
+/// off-screen webview navigation). Both the Directory profile "shared classes" lookup and the
+/// class's own roster sheet (CourseView/Mac_CourseDetailView) should go through this instead of
+/// calling fetchClassRoster directly, so repeated lookups within a session are cheap after the
+/// first fetch per class.
+actor ClassRosterCache {
+    static let shared = ClassRosterCache()
+    private var cache: [String: [DirectoryPerson]] = [:]
+
+    func roster(for course: Course) async -> [DirectoryPerson] {
+        if let cached = cache[course.class_id] { return cached }
+        let fetched = await fetchClassRoster(course: course)
+        cache[course.class_id] = fetched
+        return fetched
+    }
+}
+
+/// Entry point: tries the direct fetch first, falls back to the click-through mechanism if
+/// that comes back empty.
+func fetchClassRoster(course: Course) async -> [DirectoryPerson] {
+    if let direct = await fetchClassRosterDirect(classID: course.class_id), !direct.isEmpty {
+        print("[ClassRoster] direct fetch to classes.veracross.com succeeded with \(direct.count) people")
+        return direct
+    }
+
+    print("[ClassRoster] direct fetch found no roster entries, falling back to portal click-through")
+    let fetcher = ClassRosterWebFetcher(matchHint: course.class_name)
+    guard let html = await fetcher.fetchDirectoryHTML() else {
+        print("[ClassRoster] click-through fallback failed to produce a page (no click match, navigation failure, or timeout)")
+        return []
+    }
+    let people = parseClassRoster(html: html)
+    if people.isEmpty {
+        print("[ClassRoster] click-through HTML length: \(html.count). Parse found 0 people. First 1500 chars:\n\(String(html.prefix(1500)))")
+    } else {
+        print("[ClassRoster] click-through fetch succeeded with \(people.count) people")
+    }
+    return people
+}
+
+/// Direct authenticated GET against classes.veracross.com. Returns nil on outright failure
+/// (network error, non-200, undecodable body) and an empty array if the fetch succeeded but
+/// parsing found no directory entries — callers should treat both as "didn't work" and fall
+/// back to the click-through path, but the distinction is preserved in the logs.
+private func fetchClassRosterDirect(classID: String) async -> [DirectoryPerson]? {
+    guard let url = URL(string: "https://classes.veracross.com/oakwood/course/\(classID)/website/directory") else { return nil }
+    var request = URLRequest(url: url)
+    request.httpShouldHandleCookies = true
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.timeoutInterval = 15
+
+    guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+        print("[ClassRoster] direct fetch request failed (network error)")
+        return nil
+    }
+    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+        print("[ClassRoster] direct fetch returned HTTP \(http.statusCode)")
+        return nil
+    }
+    guard let html = String(data: data, encoding: .utf8) else {
+        print("[ClassRoster] direct fetch response wasn't decodable as UTF-8 text")
+        return nil
+    }
+    print("[ClassRoster] direct fetch HTML length: \(html.count)")
+    return parseClassRoster(html: html)
+}
+
+/// Same directory-Entry component the main school Directory search already parses (see
+/// parseDirectoryEntry above) — just scoped under this page's `div.DirectoryEntries` wrapper.
+private func parseClassRoster(html: String) -> [DirectoryPerson] {
+    guard let doc = try? SwiftSoup.parse(html),
+          let entries = try? doc.select("div.DirectoryEntries div.directory-Entry"), !entries.isEmpty() else {
+        return []
+    }
+    return entries.array().compactMap { parseDirectoryEntry($0) }
+}
+
+/// Drives an off-screen, headless WKWebView through the same authenticated click-through the
+/// visible DocumentWebViewCoordinator uses (see the big comment above DocumentWebViewCoordinator
+/// near the top of this file), then hands back the final page's raw HTML instead of leaving it
+/// on screen. Never added to any view hierarchy — just a helper object that owns a WKWebView
+/// for the duration of one fetch.
+@MainActor
+private final class ClassRosterWebFetcher: NSObject, WKNavigationDelegate {
+    private let matchHint: String
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var hasClicked = false
+    private var isFinished = false
+
+    init(matchHint: String) {
+        self.matchHint = matchHint
+    }
+
+    /// Loads the known-good authenticated portal overview page, auto-clicks the matching
+    /// course's Directory link, waits for the resulting navigation, and returns that page's
+    /// `outerHTML` — or nil if the click never matched, a navigation failed, or nothing
+    /// happened within the timeout.
+    func fetchDirectoryHTML() async -> String? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+
+            let config = WKWebViewConfiguration()
+            config.websiteDataStore = .default()
+            let wv = WKWebView(frame: .zero, configuration: config)
+            wv.navigationDelegate = self
+            self.webView = wv
+            wv.load(URLRequest(url: URL(string: "https://portals.veracross.com/oakwood/student/student/overview")!))
+
+            // Safety net: if the click never leads to a second didFinish (no match, or the
+            // click-through silently does nothing), don't hang forever.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                await MainActor.run { self?.finish(with: nil, reason: "timed out waiting for click-through navigation") }
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if !hasClicked {
+            hasClicked = true
+            runAutoClick(on: webView)
+            return
+        }
+        // Second didFinish: this is (presumably) the class directory page the click navigated to.
+        webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, error in
+            Task { @MainActor in
+                if let error {
+                    print("[ClassRoster] outerHTML fetch failed: \(error)")
+                    self?.finish(with: nil, reason: "outerHTML fetch error")
+                    return
+                }
+                self?.finish(with: result as? String, reason: nil)
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        print("[ClassRoster] navigation failed: \(error)")
+        finish(with: nil, reason: "navigation failed")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        print("[ClassRoster] provisional navigation failed: \(error)")
+        finish(with: nil, reason: "provisional navigation failed")
+    }
+
+    private func runAutoClick(on webView: WKWebView) {
+        let escapedLink = "/website/directory".replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let escapedHint = matchHint.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let js = """
+        (function() {
+            var links = Array.from(document.querySelectorAll('a[href*="\(escapedLink)"]'));
+            var hint = '\(escapedHint)'.toLowerCase();
+            for (var i = 0; i < links.length; i++) {
+                var row = links[i].closest('li') || links[i].closest('.ae-grid') || links[i].parentElement;
+                var text = ((row ? row.innerText : links[i].innerText) || '').toLowerCase();
+                if (text.indexOf(hint) !== -1) {
+                    links[i].removeAttribute('target');
+                    links[i].click();
+                    return true;
+                }
+            }
+            return false;
+        })();
+        """
+        webView.evaluateJavaScript(js) { [weak self] result, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let error {
+                    print("[ClassRoster] auto-click JS failed: \(error)")
+                    self.finish(with: nil, reason: "auto-click JS error")
+                    return
+                }
+                let clicked = (result as? Bool) ?? false
+                print("[ClassRoster] auto-click matched a link: \(clicked)")
+                if !clicked {
+                    self.finish(with: nil, reason: "no matching directory link found")
+                }
+                // If clicked, wait for the next didFinish (the resulting navigation).
+            }
+        }
+    }
+
+    private func finish(with html: String?, reason: String?) {
+        guard !isFinished else { return }
+        isFinished = true
+        if let reason { print("[ClassRoster] \(reason)") }
+        webView?.navigationDelegate = nil
+        webView = nil
+        continuation?.resume(returning: html)
+        continuation = nil
+    }
 }
 
 private extension URLRequest {

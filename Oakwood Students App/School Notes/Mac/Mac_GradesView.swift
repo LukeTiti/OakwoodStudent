@@ -12,41 +12,47 @@ struct Mac_GradesView: View {
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16)]
 
     var body: some View {
-        Group {
-            if appInfo.courses.isEmpty {
-                ContentUnavailableView(
-                    "No Grades Yet",
-                    systemImage: "list.bullet.rectangle.portrait",
-                    description: Text(errorMessage ?? "Grades will appear here once loaded.")
-                )
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(appInfo.courses) { course in
-                            Mac_CourseTile(course: course)
+        // Own NavigationStack so pushing into a course detail view has its own self-contained
+        // push/pop path — without this, the push shares the outer NavigationSplitView's own
+        // path, and there's no reliable way back except switching to another sidebar tab and
+        // back (same class of bug already fixed for Clubs/Service earlier).
+        NavigationStack {
+            Group {
+                if appInfo.courses.isEmpty {
+                    ContentUnavailableView(
+                        "No Grades Yet",
+                        systemImage: "list.bullet.rectangle.portrait",
+                        description: Text(errorMessage ?? "Grades will appear here once loaded.")
+                    )
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(appInfo.courses) { course in
+                                Mac_CourseTile(course: course)
+                            }
                         }
+                        .padding()
                     }
-                    .padding()
                 }
             }
-        }
-        .navigationTitle("Grades")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button {
-                    showStats = true
-                } label: {
-                    Image(systemName: "chart.bar.fill")
+            .navigationTitle("Grades")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        showStats = true
+                    } label: {
+                        Image(systemName: "chart.bar.fill")
+                    }
                 }
             }
+            .sheet(isPresented: $showStats) {
+                Mac_StatsSheet()
+                    .environmentObject(appInfo)
+                    .frame(minWidth: 480, idealWidth: 760, minHeight: 600, idealHeight: 700)
+            }
+            .refreshable { await refreshGrades() }
+            .onAppear { Task { await loadIfNeeded() } }
         }
-        .sheet(isPresented: $showStats) {
-            Mac_StatsSheet()
-                .environmentObject(appInfo)
-                .frame(minWidth: 480, minHeight: 600)
-        }
-        .refreshable { await refreshGrades() }
-        .onAppear { Task { await loadIfNeeded() } }
     }
 
     private func loadIfNeeded() async {
@@ -57,18 +63,14 @@ struct Mac_GradesView: View {
     /// Unconditional reload (unlike loadIfNeeded, which only loads once when empty) —
     /// used by pull-to-refresh, matching VeracrossGradesView.loadGrades() on iOS.
     private func refreshGrades() async {
-        if !appInfo.isBundledMode {
-            await appInfo.restorePersistedCookiesIntoStores()
-            await syncCookies()
-        }
+        await appInfo.restorePersistedCookiesIntoStores()
+        await syncCookies()
         if let err = await appInfo.loadCourses() {
             errorMessage = err
             return
         }
         errorMessage = nil
-        if !appInfo.isBundledMode {
-            await appInfo.loadAllAssignments()
-        }
+        await appInfo.loadAllAssignments()
     }
 }
 
@@ -76,6 +78,7 @@ struct Mac_GradesView: View {
 
 private struct Mac_CourseTile: View {
     let course: Course
+    @EnvironmentObject var appInfo: AppInfo
 
     private var unreadCount: Int {
         (course.assignments ?? []).filter { $0.is_unread == 1 }.count
@@ -89,6 +92,7 @@ private struct Mac_CourseTile: View {
                 HStack(alignment: .top) {
                     Text(course.class_name)
                         .font(.title2.weight(.semibold))
+                        .foregroundStyle(appInfo.classColor(for: course) ?? .primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer()
@@ -133,6 +137,11 @@ private struct Mac_CourseTile: View {
 private struct Mac_CourseDetailView: View {
     let course: Course
     @EnvironmentObject var appInfo: AppInfo
+    @Environment(\.dismiss) private var dismiss
+    @State private var showDirectory = false
+    @State private var isLoadingRoster = false
+    @State private var hasLoadedRoster = false
+    @State private var rosterPeople: [DirectoryPerson] = []
 
     private var assignments: [Assignment] { course.assignments ?? [] }
 
@@ -161,6 +170,59 @@ private struct Mac_CourseDetailView: View {
             .padding(24)
         }
         .navigationTitle(course.class_name)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { dismiss() } label: { Label("Grades", systemImage: "chevron.left") }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    showDirectory = true
+                } label: {
+                    Image(systemName: "person.2")
+                }
+            }
+        }
+        .sheet(isPresented: $showDirectory) {
+            NavigationStack {
+                Group {
+                    if isLoadingRoster {
+                        ProgressView("Loading roster…")
+                    } else if rosterPeople.isEmpty {
+                        ContentUnavailableView(
+                            "Couldn't Load Class Roster",
+                            systemImage: "person.2.slash",
+                            description: Text("Check the Xcode console for [ClassRoster] diagnostic output.")
+                        )
+                    } else {
+                        List(rosterPeople) { person in
+                            Mac_ClassRosterPersonRow(person: person)
+                        }
+                        .macInsetListStyle()
+                    }
+                }
+                .navigationTitle("Directory")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showDirectory = false }
+                    }
+                }
+            }
+            .frame(minWidth: 600, minHeight: 500)
+            .onAppear {
+                guard !hasLoadedRoster else { return }
+                hasLoadedRoster = true
+                isLoadingRoster = true
+                Task {
+                    await appInfo.restorePersistedCookiesIntoStores()
+                    await syncCookies()
+                    let people = await ClassRosterCache.shared.roster(for: course)
+                    await MainActor.run {
+                        rosterPeople = people
+                        isLoadingRoster = false
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -182,12 +244,41 @@ private struct Mac_CourseDetailView: View {
     }
 }
 
+// MARK: - Class Roster Row
+
+private struct Mac_ClassRosterPersonRow: View {
+    let person: DirectoryPerson
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Mac_DirectoryPhoto(urlString: person.photoURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.displayName).font(.body)
+                HStack(spacing: 6) {
+                    if !person.grade.isEmpty {
+                        Text(person.grade).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let email = person.studentEmail {
+                        Text(email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+        }
+        .macRowPadding()
+    }
+}
+
 // MARK: - Grade Breakdown Panel
 
 private struct Mac_GradeBreakdownPanel: View {
     let course: Course
+    @EnvironmentObject var appInfo: AppInfo
 
     @State private var selectedPeriod = 6  // 6 = S2 (current), 2 = S1
+    @State private var result: GradeDetailResult? = nil
+    @State private var isLoading = false
+
+    private var enrollmentPK: Int { course.enrollment_pk ?? 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -203,47 +294,75 @@ private struct Mac_GradeBreakdownPanel: View {
                 .frame(width: 100)
             }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Semester 2").font(.subheadline.weight(.semibold))
-                    Text("Weighted Average").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("A").font(.title3.bold())
-                    Text("--%").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .redacted(reason: .placeholder)
-
-            Divider()
-
-            ForEach(0..<3, id: \.self) { _ in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Assignment Type").font(.subheadline.weight(.semibold))
-                        Text("00% of grade")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.15))
-                            .foregroundStyle(.blue)
-                            .clipShape(Capsule())
-                        Spacer()
-                        Text("--%").font(.subheadline.weight(.semibold))
+            if isLoading {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            } else if let result {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.semesterTitle).font(.subheadline.weight(.semibold))
+                        Text(result.gradingMethod).font(.caption).foregroundStyle(.secondary)
                     }
-                    HStack {
-                        Text("-- assignments").font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("-- / -- pts").font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(result.letterGrade).font(.title3.bold())
+                        if let pct = Double(result.ptdGrade) {
+                            Text(String(format: "%.1f%%", pct))
+                                .font(.caption)
+                                .foregroundStyle(gradeColor(for: result.ptdGrade))
+                        }
                     }
                 }
-                .redacted(reason: .placeholder)
+
+                if !result.breakdown.isEmpty {
+                    Divider()
+
+                    ForEach(result.breakdown) { row in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(row.typeName).font(.subheadline.weight(.semibold))
+                                if let w = row.weight {
+                                    Text(String(format: "%.0f%% of grade", w))
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue.opacity(0.15))
+                                        .foregroundStyle(.blue)
+                                        .clipShape(Capsule())
+                                }
+                                Spacer()
+                                Text(String(format: "%.1f%%", row.average))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(gradeColor(for: String(row.average)))
+                            }
+                            HStack {
+                                Text("\(row.count) assignment\(row.count == 1 ? "" : "s")")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(String(format: "%.1f / %.1f pts", row.pointsEarned, row.pointsPossible))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("No data available for this period.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .task(id: selectedPeriod) { await load() }
+    }
+
+    private func load() async {
+        guard enrollmentPK > 0 else { return }
+        isLoading = true
+        result = nil
+        await syncCookies()
+        result = await appInfo.fetchGradeDetail(courseID: enrollmentPK, gradingPeriod: selectedPeriod)
+        isLoading = false
     }
 }
 
