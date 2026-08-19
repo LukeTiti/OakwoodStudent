@@ -45,11 +45,18 @@ struct Mac_GradesView: View {
                 .environmentObject(appInfo)
                 .frame(minWidth: 480, minHeight: 600)
         }
+        .refreshable { await refreshGrades() }
         .onAppear { Task { await loadIfNeeded() } }
     }
 
     private func loadIfNeeded() async {
         guard appInfo.courses.isEmpty else { return }
+        await refreshGrades()
+    }
+
+    /// Unconditional reload (unlike loadIfNeeded, which only loads once when empty) —
+    /// used by pull-to-refresh, matching VeracrossGradesView.loadGrades() on iOS.
+    private func refreshGrades() async {
         if !appInfo.isBundledMode {
             await appInfo.restorePersistedCookiesIntoStores()
             await syncCookies()
@@ -58,6 +65,7 @@ struct Mac_GradesView: View {
             errorMessage = err
             return
         }
+        errorMessage = nil
         if !appInfo.isBundledMode {
             await appInfo.loadAllAssignments()
         }

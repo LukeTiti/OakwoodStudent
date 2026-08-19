@@ -14,6 +14,9 @@ struct Mac_ServiceView: View {
     @State private var forms: [SubmittedForm] = []
     @State private var totalHours: Double = 0
     @State private var showPDF = false
+    @State private var showPDFShare = false
+    @State private var pdfShareFileURL: URL? = nil
+    @State private var isPreparingPDFShare = false
     @State private var showAddSheet = false
     @State private var showCreateForm = false
     @State private var isSelecting = false
@@ -35,6 +38,21 @@ struct Mac_ServiceView: View {
             }
         }
         return map
+    }
+
+    /// Every veracrossId actually present in the scraped Veracross data right now.
+    private var scrapedVeracrossIds: Set<Int> {
+        Set(servicesByYear.values.flatMap { $0 }.compactMap { $0.veracrossId })
+    }
+
+    /// Once an approved form's hours actually show up for real in Veracross (via the
+    /// veracrossRecordId the advisor extension writes back on approval), it's redundant to
+    /// keep showing the tracking form separately — the year-grouped Veracross section below
+    /// already surfaces it (still linked back to this same form via veracrossIdToFormService).
+    private var visibleForms: [SubmittedForm] {
+        forms.filter { form in
+            !(form.status == "approved" && form.services.contains { $0.veracrossRecordId.map(scrapedVeracrossIds.contains) ?? false })
+        }
     }
 
     /// Past outside-service (title, organization, tax ID) combos, most recent first —
@@ -107,9 +125,9 @@ struct Mac_ServiceView: View {
                 }
             }
 
-            if !forms.isEmpty {
+            if !visibleForms.isEmpty {
                 Section("Forms") {
-                    ForEach(forms) { form in
+                    ForEach(visibleForms) { form in
                         NavigationLink {
                             Mac_ServiceFormDetailView(form: form)
                         } label: {
@@ -137,6 +155,7 @@ struct Mac_ServiceView: View {
         }
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity, alignment: .center)
+        .refreshable { await loadServiceHours() }
         .navigationTitle("Community Service")
         .toolbar {
             ToolbarItemGroup(placement: .confirmationAction) {
@@ -167,7 +186,26 @@ struct Mac_ServiceView: View {
             NavigationStack {
                 PDFViewer(url: pdfURL ?? URL(string: "about:blank")!, appInfo: appInfo)
                     .navigationTitle("Service Record")
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPDF = false } } }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                guard let pdfURL else { return }
+                                isPreparingPDFShare = true
+                                Task {
+                                    pdfShareFileURL = await downloadPDFForSharing(url: pdfURL, appInfo: appInfo)
+                                    isPreparingPDFShare = false
+                                    if pdfShareFileURL != nil { showPDFShare = true }
+                                }
+                            } label: {
+                                if isPreparingPDFShare { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
+                            }
+                            .disabled(pdfURL == nil || isPreparingPDFShare)
+                        }
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { showPDF = false } }
+                    }
+                    .sheet(isPresented: $showPDFShare) {
+                        if let pdfShareFileURL { ShareSheet(items: [pdfShareFileURL]) }
+                    }
             }
             .frame(minWidth: 500, minHeight: 600)
         }
@@ -376,7 +414,15 @@ private struct Mac_CreateFormSheet: View {
 
     private var hasOutsideService: Bool { selectedServices.contains { $0.description == "Outside Community Service" } }
     private var totalHours: Double { selectedServices.reduce(0) { $0 + $1.hours } }
-    private var canSubmit: Bool { !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty }
+    private var canSubmit: Bool {
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty &&
+        !advisorName.isEmpty &&
+        !selectedSLOs.isEmpty &&
+        !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+    }
 
     var body: some View {
         NavigationStack {
@@ -412,22 +458,28 @@ private struct Mac_CreateFormSheet: View {
                     }
                 }
 
+                // Wrapped in a single VStack (rather than direct Form children) so this
+                // section counts as one row — mixing a long Text, several Button rows, and
+                // a TextField as direct Form children blows out macOS Form's shared
+                // label/control column width, squishing every other field in the sheet.
                 Section {
-                    Text("How did your service recorded on this form incorporate the Schoolwide Learner Objectives (SLOs) of Oakwood High School?")
-                        .font(.subheadline)
-                    ForEach(slOptions, id: \.self) { slo in
-                        Button {
-                            if selectedSLOs.contains(slo) { selectedSLOs.remove(slo) } else { selectedSLOs.insert(slo) }
-                        } label: {
-                            HStack {
-                                Image(systemName: selectedSLOs.contains(slo) ? "checkmark.square.fill" : "square")
-                                Text(slo)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("How did your service recorded on this form incorporate the Schoolwide Learner Objectives (SLOs) of Oakwood High School?")
+                            .font(.subheadline)
+                        ForEach(slOptions, id: \.self) { slo in
+                            Button {
+                                if selectedSLOs.contains(slo) { selectedSLOs.remove(slo) } else { selectedSLOs.insert(slo) }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedSLOs.contains(slo) ? "checkmark.square.fill" : "square")
+                                    Text(slo)
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.primary)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
+                        TextField("How did your service incorporate the SLO(s) noted above?", text: $reflection1, axis: .vertical).lineLimit(3...6)
                     }
-                    TextField("How did your service incorporate the SLO(s) noted above?", text: $reflection1, axis: .vertical).lineLimit(3...6)
                 } header: { Text("Student Reflection") }
 
                 Section {
@@ -470,6 +522,7 @@ private struct Mac_CreateFormSheet: View {
                     Section { Text(error).foregroundStyle(.red) }
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("Create Form")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -564,7 +617,15 @@ private struct Mac_EditAndResubmitSheet: View {
 
     private var hasOutsideService: Bool { services.contains { $0.description == "Outside Community Service" } }
     private var totalHours: Double { services.reduce(0) { $0 + $1.hours } }
-    private var canSubmit: Bool { !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty }
+    private var canSubmit: Bool {
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty &&
+        !advisorName.isEmpty &&
+        !selectedSLOs.isEmpty &&
+        !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+    }
 
     var body: some View {
         NavigationStack {
@@ -611,22 +672,28 @@ private struct Mac_EditAndResubmitSheet: View {
                     }
                 }
 
+                // Wrapped in a single VStack (rather than direct Form children) so this
+                // section counts as one row — mixing a long Text, several Button rows, and
+                // a TextField as direct Form children blows out macOS Form's shared
+                // label/control column width, squishing every other field in the sheet.
                 Section {
-                    Text("How did your service recorded on this form incorporate the Schoolwide Learner Objectives (SLOs) of Oakwood High School?")
-                        .font(.subheadline)
-                    ForEach(slOptions, id: \.self) { slo in
-                        Button {
-                            if selectedSLOs.contains(slo) { selectedSLOs.remove(slo) } else { selectedSLOs.insert(slo) }
-                        } label: {
-                            HStack {
-                                Image(systemName: selectedSLOs.contains(slo) ? "checkmark.square.fill" : "square")
-                                Text(slo)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("How did your service recorded on this form incorporate the Schoolwide Learner Objectives (SLOs) of Oakwood High School?")
+                            .font(.subheadline)
+                        ForEach(slOptions, id: \.self) { slo in
+                            Button {
+                                if selectedSLOs.contains(slo) { selectedSLOs.remove(slo) } else { selectedSLOs.insert(slo) }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedSLOs.contains(slo) ? "checkmark.square.fill" : "square")
+                                    Text(slo)
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.primary)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
+                        TextField("How did your service incorporate the SLO(s) noted above?", text: $reflection1, axis: .vertical).lineLimit(3...6)
                     }
-                    TextField("How did your service incorporate the SLO(s) noted above?", text: $reflection1, axis: .vertical).lineLimit(3...6)
                 } header: { Text("Student Reflection") }
 
                 Section {
@@ -668,6 +735,7 @@ private struct Mac_EditAndResubmitSheet: View {
                     Section { Text(error).foregroundStyle(.red) }
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("Edit & Resubmit")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

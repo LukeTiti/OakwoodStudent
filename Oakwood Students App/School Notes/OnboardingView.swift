@@ -106,19 +106,6 @@ private struct OnboardingPrimaryButton: View {
     }
 }
 
-private struct OnboardingSkipButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text("Skip for now")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
 // MARK: - Main Onboarding Container
 
 struct OnboardingView: View {
@@ -138,13 +125,12 @@ struct OnboardingView: View {
                     feature: onboardingFeatures[step - 1],
                     stepIndex: step - 1,
                     totalFeatures: onboardingFeatures.count,
-                    onNext: advance,
-                    onSkipToSetup: { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { step = 5 } }
+                    onNext: advance
                 )
             case 5:
-                NotificationsOnboardingPage(onComplete: advance, onSkip: advance)
+                NotificationsOnboardingPage(onComplete: advance)
             case 6:
-                VeracrossOnboardingPage(onComplete: advance, onSkip: advance)
+                VeracrossOnboardingPage(onComplete: advance)
             case 7:
                 GoogleOnboardingPage(onComplete: advance)
             default:
@@ -209,7 +195,6 @@ struct FeatureOnboardingPage: View {
     let stepIndex: Int
     let totalFeatures: Int
     let onNext: () -> Void
-    let onSkipToSetup: () -> Void
 
     private var isLastFeature: Bool { stepIndex == totalFeatures - 1 }
 
@@ -247,13 +232,6 @@ struct FeatureOnboardingPage: View {
 
             VStack(spacing: 14) {
                 OnboardingPrimaryButton(isLastFeature ? "Get Started" : "Next", action: onNext)
-
-                Button(action: onSkipToSetup) {
-                    Text("Skip Intro")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 2)
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 52)
@@ -265,7 +243,6 @@ struct FeatureOnboardingPage: View {
 
 struct NotificationsOnboardingPage: View {
     let onComplete: () -> Void
-    let onSkip: () -> Void
     @State private var requested = false
 
     var body: some View {
@@ -298,8 +275,6 @@ struct NotificationsOnboardingPage: View {
                     }
                 }
                 .disabled(requested)
-
-                OnboardingSkipButton(action: onSkip)
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 52)
@@ -311,68 +286,66 @@ struct NotificationsOnboardingPage: View {
 
 struct VeracrossOnboardingPage: View {
     let onComplete: () -> Void
-    let onSkip: () -> Void
     @EnvironmentObject var appInfo: AppInfo
     @State private var showingWebView = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(Color.green.opacity(0.15))
-                        .frame(width: 100, height: 100)
-                    Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        .font(.system(size: 42))
-                        .foregroundStyle(.green)
-                }
-                .padding(.top, 64)
-
-                VStack(spacing: 8) {
-                    Text("Connect Veracross")
-                        .font(.title.bold())
-                    Text("Sign in to load your grades and assignments.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-            }
-
-            if showingWebView {
-                VeracrossLoginView(
-                    url: URL(string: "https://portals.veracross.com/oakwood/student")!,
-                    onLogin: {
-                        Task {
-                            await syncCookies()
-                            await appInfo.captureCurrentCookies()
-                            appInfo.preloadAll()
-                        }
-                        onComplete()
+        if showingWebView {
+            // True full screen once sign-in starts — no header, no padding, no
+            // rounded corners boxing it in; just the login page itself.
+            VeracrossLoginView(
+                url: URL(string: "https://portals.veracross.com/oakwood/student")!,
+                onLogin: {
+                    Task {
+                        await syncCookies()
+                        await appInfo.captureCurrentCookies()
+                        // Explicitly await grades before marking past-due ones complete — the
+                        // remaining onboarding steps (Google sign-in, completion screen) give
+                        // this a head start, so by the time the user reaches To Do, past-due
+                        // assignments are already handled instead of visibly flashing and then
+                        // disappearing a few seconds after the tab first appears.
+                        await appInfo.preloadGrades()
+                        appInfo.markPastAssignmentsCompleted()
+                        appInfo.preloadAll()
                     }
-                )
-                .frame(maxWidth: .infinity)
-                .frame(maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
-            } else {
+                    onComplete()
+                }
+            )
+            .ignoresSafeArea()
+        } else {
+            VStack(spacing: 0) {
                 Spacer()
-            }
 
-            Spacer()
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.15))
+                            .frame(width: 100, height: 100)
+                        Image(systemName: "list.bullet.rectangle.portrait.fill")
+                            .font(.system(size: 42))
+                            .foregroundStyle(.green)
+                    }
 
-            VStack(spacing: 14) {
-                if !showingWebView {
-                    OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
-                        withAnimation { showingWebView = true }
+                    VStack(spacing: 8) {
+                        Text("Connect Veracross")
+                            .font(.title.bold())
+                        Text("Sign in to load your grades and assignments.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
                     }
                 }
+                .padding(.horizontal, 32)
 
-                OnboardingSkipButton(action: onSkip)
+                Spacer()
+
+                OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
+                    withAnimation { showingWebView = true }
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 52)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 52)
         }
     }
 }
@@ -386,6 +359,7 @@ struct GoogleOnboardingPage: View {
     @State private var isSignedIn = false
     @State private var userName = ""
     @State private var userEmail = ""
+    @State private var signInError: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -432,6 +406,14 @@ struct GoogleOnboardingPage: View {
                     OnboardingPrimaryButton("Sign In with Google", icon: "person.badge.plus", style: .solid(.oakwoodGreen)) {
                         appInfo.googleVM.signIn()
                     }
+
+                    if let signInError {
+                        Text(signInError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+                    }
                 }
             }
             .padding(.horizontal, 32)
@@ -447,6 +429,7 @@ struct GoogleOnboardingPage: View {
         }
         .onReceive(appInfo.googleVM.$userName) { userName = $0 }
         .onReceive(appInfo.googleVM.$userEmail) { userEmail = $0 }
+        .onReceive(appInfo.googleVM.$signInError) { signInError = $0 }
     }
 }
 

@@ -113,20 +113,6 @@ private struct Mac_OnboardingPrimaryButton: View {
     }
 }
 
-private struct Mac_OnboardingSkipButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text("Skip for now")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
-    }
-}
-
 // MARK: - Main Mac Onboarding Container
 
 struct Mac_OnboardingView: View {
@@ -146,13 +132,12 @@ struct Mac_OnboardingView: View {
                     feature: onboardingFeatures[step - 1],
                     stepIndex: step - 1,
                     totalFeatures: onboardingFeatures.count,
-                    onNext: advance,
-                    onSkipToSetup: { withAnimation { step = 5 } }
+                    onNext: advance
                 )
             case 5:
-                Mac_NotificationsOnboardingPage(onComplete: advance, onSkip: advance)
+                Mac_NotificationsOnboardingPage(onComplete: advance)
             case 6:
-                Mac_VeracrossOnboardingPage(onComplete: advance, onSkip: advance)
+                Mac_VeracrossOnboardingPage(onComplete: advance)
             case 7:
                 Mac_GoogleOnboardingPage(onComplete: advance)
             default:
@@ -214,7 +199,6 @@ struct Mac_FeatureOnboardingPage: View {
     let stepIndex: Int
     let totalFeatures: Int
     let onNext: () -> Void
-    let onSkipToSetup: () -> Void
 
     private var isLastFeature: Bool { stepIndex == totalFeatures - 1 }
 
@@ -252,14 +236,6 @@ struct Mac_FeatureOnboardingPage: View {
 
             VStack(spacing: 12) {
                 Mac_OnboardingPrimaryButton(isLastFeature ? "Get Started" : "Next", action: onNext)
-
-                Button(action: onSkipToSetup) {
-                    Text("Skip Intro")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 2)
             }
             .padding(.horizontal, 40)
             .padding(.bottom, 40)
@@ -271,7 +247,6 @@ struct Mac_FeatureOnboardingPage: View {
 
 struct Mac_NotificationsOnboardingPage: View {
     let onComplete: () -> Void
-    let onSkip: () -> Void
     @State private var requested = false
 
     var body: some View {
@@ -308,8 +283,6 @@ struct Mac_NotificationsOnboardingPage: View {
                     }
                 }
                 .disabled(requested)
-
-                Mac_OnboardingSkipButton(action: onSkip)
             }
             .padding(.horizontal, 40)
             .padding(.bottom, 40)
@@ -321,68 +294,65 @@ struct Mac_NotificationsOnboardingPage: View {
 
 struct Mac_VeracrossOnboardingPage: View {
     let onComplete: () -> Void
-    let onSkip: () -> Void
     @EnvironmentObject var appInfo: AppInfo
     @State private var showingWebView = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(Color.green.opacity(0.15))
-                        .frame(width: 84, height: 84)
-                    Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.green)
-                }
-                .padding(.top, 44)
-
-                VStack(spacing: 6) {
-                    Text("Connect Veracross")
-                        .font(.title.bold())
-                    Text("Sign in to load your grades and assignments.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-            }
-
-            if showingWebView {
-                VeracrossLoginView(
-                    url: URL(string: "https://portals.veracross.com/oakwood/student")!,
-                    onLogin: {
-                        Task {
-                            await syncCookies()
-                            await appInfo.captureCurrentCookies()
-                            appInfo.preloadAll()
-                        }
-                        onComplete()
+        if showingWebView {
+            // Full screen (within the onboarding window's frame) once sign-in starts —
+            // no header, no padding, no rounded corners boxing it in.
+            VeracrossLoginView(
+                url: URL(string: "https://portals.veracross.com/oakwood/student")!,
+                onLogin: {
+                    Task {
+                        await syncCookies()
+                        await appInfo.captureCurrentCookies()
+                        // Explicitly await grades before marking past-due ones complete — the
+                        // remaining onboarding steps (Google sign-in, completion screen) give
+                        // this a head start, so by the time the user reaches To Do, past-due
+                        // assignments are already handled instead of visibly flashing and then
+                        // disappearing a few seconds after the tab first appears.
+                        await appInfo.preloadGrades()
+                        appInfo.markPastAssignmentsCompleted()
+                        appInfo.preloadAll()
                     }
-                )
-                .frame(maxWidth: .infinity)
-                .frame(maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
-            } else {
+                    onComplete()
+                }
+            )
+        } else {
+            VStack(spacing: 0) {
                 Spacer()
-            }
 
-            Spacer()
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.15))
+                            .frame(width: 84, height: 84)
+                        Image(systemName: "list.bullet.rectangle.portrait.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.green)
+                    }
 
-            VStack(spacing: 12) {
-                if !showingWebView {
-                    Mac_OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
-                        withAnimation { showingWebView = true }
+                    VStack(spacing: 6) {
+                        Text("Connect Veracross")
+                            .font(.title.bold())
+                        Text("Sign in to load your grades and assignments.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
                     }
                 }
+                .padding(.horizontal, 32)
 
-                Mac_OnboardingSkipButton(action: onSkip)
+                Spacer()
+
+                Mac_OnboardingPrimaryButton("Sign In to Veracross", icon: "safari.fill", style: .solid(.green)) {
+                    withAnimation { showingWebView = true }
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
             }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 40)
         }
     }
 }
@@ -396,6 +366,7 @@ struct Mac_GoogleOnboardingPage: View {
     @State private var isSignedIn = false
     @State private var userName = ""
     @State private var userEmail = ""
+    @State private var signInError: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -443,6 +414,14 @@ struct Mac_GoogleOnboardingPage: View {
                         appInfo.googleVM.signIn()
                     }
                     // Mandatory — no skip option, matching the iOS onboarding fix.
+
+                    if let signInError {
+                        Text(signInError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+                    }
                 }
             }
             .padding(.horizontal, 40)
@@ -458,6 +437,7 @@ struct Mac_GoogleOnboardingPage: View {
         }
         .onReceive(appInfo.googleVM.$userName) { userName = $0 }
         .onReceive(appInfo.googleVM.$userEmail) { userEmail = $0 }
+        .onReceive(appInfo.googleVM.$signInError) { signInError = $0 }
     }
 }
 

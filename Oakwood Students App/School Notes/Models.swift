@@ -768,6 +768,22 @@ func mailtoURL(_ data: MailData) -> URL? {
     return components.url
 }
 
+/// Downloads the PDF at `url` (using the app's authenticated Veracross session, same as
+/// PDFViewer below) and writes it to a local temp file. Sharing the remote URL directly doesn't
+/// work for anyone but the signed-in student — it requires their own logged-in session to open —
+/// so this gives the share sheet a real, standalone PDF file instead.
+func downloadPDFForSharing(url: URL, appInfo: AppInfo) async -> URL? {
+    await appInfo.restorePersistedCookiesIntoStores()
+    guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("Service Record.pdf")
+    do {
+        try data.write(to: tempURL, options: .atomic)
+        return tempURL
+    } catch {
+        return nil
+    }
+}
+
 // MARK: - PDF Viewer
 
 #if os(iOS)

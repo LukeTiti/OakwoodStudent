@@ -27,6 +27,10 @@ struct SettingsView: View {
     @State private var labStatus: String = ""
     @State private var isRunningLabTest = false
 
+    // Local per-platform flag (not synced between iOS/Mac, or across reinstalls of the
+    // same platform) — see ContentView.swift / Mac_ContentView.swift's top-level gate.
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+
     // Manual Veracross login trigger — independent of `isBundledMode`. Directory and
     // Community Service always hit live Veracross endpoints (never part of the bundled
     // summer JSON), so users need a way to establish a real session even while Grades/To Do
@@ -131,6 +135,13 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Onboarding (Debug)") {
+                    Button("Reset Onboarding") {
+                        hasCompletedOnboarding = false
+                    }
+                    .foregroundColor(.red)
+                }
+
                 // CloudKit Notification Lab (Debug) — experimental diagnostics for tracking
                 // down why CKQuerySubscription push notifications aren't firing. Each button
                 // runs a different configuration variation; results print to Xcode's console
@@ -202,6 +213,29 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            #if os(iOS)
+            .fullScreenCover(isPresented: $showVeracrossLogin) {
+                NavigationStack {
+                    VeracrossLoginView(
+                        url: URL(string: "https://portals.veracross.com/oakwood/student")!,
+                        onLogin: {
+                            Task {
+                                await syncCookies()
+                                await appInfo.captureCurrentCookies()
+                            }
+                            showVeracrossLogin = false
+                        }
+                    )
+                    .navigationTitle("Login to Veracross")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showVeracrossLogin = false }
+                        }
+                    }
+                }
+            }
+            #elseif os(macOS)
             .sheet(isPresented: $showVeracrossLogin) {
                 NavigationStack {
                     VeracrossLoginView(
@@ -215,19 +249,15 @@ struct SettingsView: View {
                         }
                     )
                     .navigationTitle("Login to Veracross")
-                    #if os(iOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                    #endif
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancel") { showVeracrossLogin = false }
                         }
                     }
                 }
-                #if os(macOS)
                 .frame(minWidth: 480, minHeight: 600)
-                #endif
             }
+            #endif
         }
     }
 

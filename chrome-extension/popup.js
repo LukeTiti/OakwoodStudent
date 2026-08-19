@@ -33,6 +33,17 @@ const pendingListEl = document.getElementById("pendingList");
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
 const advisorSelectContainer = document.getElementById("advisorSelectContainer");
+const toggleTestingBtn = document.getElementById("toggleTestingBtn");
+const testingToolsEl = document.getElementById("testingTools");
+
+// Testing tools (the hardcoded-PK Pull/Update/Create/Lookup buttons) are dev-only
+// diagnostics, not part of the real advisor workflow — collapsed by default so the
+// popup looks like the real tool it is, with a small toggle to reveal them.
+toggleTestingBtn.addEventListener("click", () => {
+  const isHidden = testingToolsEl.style.display === "none";
+  testingToolsEl.style.display = isHidden ? "block" : "none";
+  toggleTestingBtn.textContent = isHidden ? "Hide Testing Tools" : "Show Testing Tools";
+});
 
 function setStatus(text, kind) {
   statusEl.textContent = text;
@@ -396,10 +407,38 @@ function parseCreateResult(result) {
   return { success: recordPk != null && failed.length === 0, recordPk };
 }
 
-// Builds the (initially hidden) detail panel for a pending item: supervisor
-// info, the signature image (if present), signer/signed info, tax ID,
-// advisor name, and the full per-entry services list. Fields that are
-// missing/empty are simply omitted rather than shown as blank/"undefined".
+function wordCount(text) {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Total across all three reflection questions (see the app's Community Service
+// form — reflection1/2/3 are the real SLO/community/academic-connection
+// questions from the paper form, slos is the checked-category list). A quick
+// word-count gives the advisor a sense of effort at a glance without having
+// to open "More Info" and read every answer in full.
+function totalReflectionWordCount(form) {
+  return [form.reflection1, form.reflection2, form.reflection3]
+    .map(wordCount)
+    .reduce((a, b) => a + b, 0);
+}
+
+function signatureSrc(form) {
+  // Firestore field is "signatureImage" (written by public/sign/index.html's
+  // canvas.toDataURL(), read the same way by FirebaseService.swift's
+  // parseSubmittedForm) — not "signatureImageBase64".
+  if (!form.signatureImage) return null;
+  return form.signatureImage.startsWith("data:")
+    ? form.signatureImage
+    : `data:image/png;base64,${form.signatureImage}`;
+}
+
+// Builds the (initially hidden) detail panel for a pending item: the fields
+// NOT already promoted into the always-visible card (signature, supervisor
+// name/email, organization, tax ID, and reflection word count all live in
+// the card header now — see renderPendingList) plus the full reflection
+// answers, SLOs, and per-entry services list. Fields that are missing/empty
+// are simply omitted rather than shown as blank/"undefined".
 function buildDetailPanel(form) {
   const detail = document.createElement("div");
   detail.className = "pending-item-detail";
@@ -408,32 +447,57 @@ function buildDetailPanel(form) {
   const addLine = (label, value) => {
     if (value === undefined || value === null || value === "") return;
     const line = document.createElement("div");
-    line.textContent = `${label}: ${value}`;
+    line.className = "detail-line";
+    line.innerHTML = `<span class="label">${label}:</span> `;
+    line.appendChild(document.createTextNode(value));
     detail.appendChild(line);
   };
 
-  addLine("Supervisor", form.supervisorName);
-  addLine("Supervisor email", form.supervisorEmail);
   addLine("Signer email", form.signerEmail);
   addLine("Signed at", form.signedAt);
-  addLine("Tax ID", form.taxID);
   addLine("Advisor", form.advisorName);
 
-  if (form.signatureImageBase64) {
-    const src = form.signatureImageBase64.startsWith("data:")
-      ? form.signatureImageBase64
-      : `data:image/png;base64,${form.signatureImageBase64}`;
-    const img = document.createElement("img");
-    img.className = "signature-img";
-    img.src = src;
-    img.alt = "Supervisor signature";
-    detail.appendChild(img);
+  if (Array.isArray(form.slos) && form.slos.length > 0) {
+    const title = document.createElement("div");
+    title.className = "detail-section-title";
+    title.textContent = "Schoolwide Learner Objectives";
+    detail.appendChild(title);
+    const line = document.createElement("div");
+    line.className = "service-entry";
+    line.textContent = form.slos.join(", ");
+    detail.appendChild(line);
+  }
+
+  const reflections = [
+    { q: "How did your service incorporate the SLO(s) noted above?", a: form.reflection1 },
+    { q: "How did your service contribute to your community?", a: form.reflection2 },
+    { q: "Did this service connect to or enhance your academic goals or interests?", a: form.reflection3 }
+  ].filter(r => r.a);
+
+  if (reflections.length > 0) {
+    const title = document.createElement("div");
+    title.className = "detail-section-title";
+    title.textContent = "Reflections";
+    detail.appendChild(title);
+    for (const r of reflections) {
+      const block = document.createElement("div");
+      block.className = "reflection-block";
+      const q = document.createElement("div");
+      q.className = "reflection-q";
+      q.textContent = r.q;
+      const a = document.createElement("div");
+      a.className = "reflection-a";
+      a.textContent = r.a;
+      block.appendChild(q);
+      block.appendChild(a);
+      detail.appendChild(block);
+    }
   }
 
   if (form.services && form.services.length > 0) {
     const title = document.createElement("div");
     title.className = "detail-section-title";
-    title.textContent = "Service entries:";
+    title.textContent = "Service entries";
     detail.appendChild(title);
 
     for (const service of form.services) {
@@ -463,14 +527,77 @@ function renderPendingList(forms) {
     const div = document.createElement("div");
     div.className = "pending-item";
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent =
-      `${form.studentName || form.studentId || "(unknown student)"} — ${form.title || "Untitled"}\n` +
-      `${form.totalHours || 0} hrs, ${form.organization || "no org"}, personPK: ${form.personPK ?? "MISSING"}`;
-    div.appendChild(meta);
+    // Header: student name/title on the left, hours as a badge on the right.
+    const header = document.createElement("div");
+    header.className = "pending-item-header";
+    const studentInfo = document.createElement("div");
+    const studentName = document.createElement("div");
+    studentName.className = "student-name";
+    studentName.textContent = form.studentName || form.studentId || "(unknown student)";
+    const formTitle = document.createElement("div");
+    formTitle.className = "form-title";
+    formTitle.textContent = form.title || "Untitled";
+    studentInfo.appendChild(studentName);
+    studentInfo.appendChild(formTitle);
+    const hoursBadge = document.createElement("div");
+    hoursBadge.className = "hours-badge";
+    hoursBadge.textContent = `${form.totalHours || 0} hrs`;
+    header.appendChild(studentInfo);
+    header.appendChild(hoursBadge);
+    div.appendChild(header);
+
+    // Supervisor row: small signature thumbnail next to name/email.
+    const supervisorRow = document.createElement("div");
+    supervisorRow.className = "supervisor-row";
+    const sigSrc = signatureSrc(form);
+    if (sigSrc) {
+      const img = document.createElement("img");
+      img.className = "signature-thumb";
+      img.src = sigSrc;
+      img.alt = "Supervisor signature";
+      supervisorRow.appendChild(img);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "signature-placeholder";
+      placeholder.textContent = "no sig";
+      supervisorRow.appendChild(placeholder);
+    }
+    const supervisorInfo = document.createElement("div");
+    supervisorInfo.className = "supervisor-info";
+    const supervisorName = document.createElement("div");
+    supervisorName.className = "supervisor-name";
+    supervisorName.textContent = form.supervisorName || "(no supervisor name)";
+    const supervisorEmail = document.createElement("div");
+    supervisorEmail.className = "supervisor-email";
+    supervisorEmail.textContent = form.supervisorEmail || "(no supervisor email)";
+    supervisorInfo.appendChild(supervisorName);
+    supervisorInfo.appendChild(supervisorEmail);
+    supervisorRow.appendChild(supervisorInfo);
+    div.appendChild(supervisorRow);
+
+    // Quick facts: organization, tax ID, reflection word count — each
+    // omitted individually if not applicable, so the row never shows blanks.
+    const facts = [];
+    facts.push(form.organization ? `Org: ${form.organization}` : "No org");
+    if (form.taxID) facts.push(`Tax ID: ${form.taxID}`);
+    const wc = totalReflectionWordCount(form);
+    if (wc > 0) facts.push(`${wc} word${wc === 1 ? "" : "s"} in reflections`);
+    if (!form.personPK) facts.push("No personPK");
+
+    const quickFacts = document.createElement("div");
+    quickFacts.className = "quick-facts";
+    for (const fact of facts) {
+      const pill = document.createElement("span");
+      pill.className = "fact-pill";
+      pill.textContent = fact;
+      quickFacts.appendChild(pill);
+    }
+    div.appendChild(quickFacts);
 
     const detail = buildDetailPanel(form);
+
+    const actions = document.createElement("div");
+    actions.className = "pending-item-actions";
 
     const moreInfoBtn = document.createElement("button");
     moreInfoBtn.className = "more-info-btn";
@@ -480,25 +607,30 @@ function renderPendingList(forms) {
       detail.style.display = isHidden ? "block" : "none";
       moreInfoBtn.textContent = isHidden ? "Hide Info" : "More Info";
     });
-    div.appendChild(moreInfoBtn);
+    actions.appendChild(moreInfoBtn);
 
-    if (!form.personPK) {
-      const warn = document.createElement("div");
-      warn.className = "warn";
-      warn.textContent = "No personPK on this submission — can't post to Veracross.";
-      div.appendChild(warn);
-    } else {
-      const btn = document.createElement("button");
-      btn.textContent = "Approve & Post to Veracross";
-      btn.addEventListener("click", () => approveForm(form, btn));
-      div.appendChild(btn);
+    if (form.personPK) {
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "approve-btn";
+      approveBtn.textContent = "Approve";
+      approveBtn.addEventListener("click", () => approveForm(form, approveBtn));
+      actions.appendChild(approveBtn);
     }
 
     const rejectBtn = document.createElement("button");
     rejectBtn.className = "reject-btn";
     rejectBtn.textContent = "Reject";
     rejectBtn.addEventListener("click", () => handleRejectClick(form, rejectBtn));
-    div.appendChild(rejectBtn);
+    actions.appendChild(rejectBtn);
+
+    div.appendChild(actions);
+
+    if (!form.personPK) {
+      const warn = document.createElement("div");
+      warn.className = "warn";
+      warn.textContent = "No personPK on this submission — can't post to Veracross.";
+      div.appendChild(warn);
+    }
 
     div.appendChild(detail);
 

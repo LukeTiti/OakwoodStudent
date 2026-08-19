@@ -18,6 +18,9 @@ struct ServiceView: View {
     @State private var forms: [SubmittedForm] = []
     @State private var totalHours: Double = 0
     @State private var showPDF = false
+    @State private var showPDFShare = false
+    @State private var pdfShareFileURL: URL? = nil
+    @State private var isPreparingPDFShare = false
     @State private var showAddSheet = false
     @State private var showCreateForm = false
     @State private var isSelecting = false
@@ -39,6 +42,21 @@ struct ServiceView: View {
             }
         }
         return map
+    }
+
+    /// Every veracrossId actually present in the scraped Veracross data right now.
+    private var scrapedVeracrossIds: Set<Int> {
+        Set(servicesByYear.values.flatMap { $0 }.compactMap { $0.veracrossId })
+    }
+
+    /// Once an approved form's hours actually show up for real in Veracross (via the
+    /// veracrossRecordId the advisor extension writes back on approval), it's redundant to
+    /// keep showing the tracking form separately — the year-grouped Veracross section below
+    /// already surfaces it (still linked back to this same form via veracrossIdToFormService).
+    private var visibleForms: [SubmittedForm] {
+        forms.filter { form in
+            !(form.status == "approved" && form.services.contains { $0.veracrossRecordId.map(scrapedVeracrossIds.contains) ?? false })
+        }
     }
 
     /// Past outside-service (title, organization, tax ID) combos, most recent first —
@@ -100,9 +118,9 @@ struct ServiceView: View {
                 }
 
                 // Forms
-                if !forms.isEmpty {
+                if !visibleForms.isEmpty {
                     Section("Forms") {
-                        ForEach(forms) { form in
+                        ForEach(visibleForms) { form in
                             NavigationLink(destination: ServiceFormDetailView(form: form)) {
                                 ServiceFormRow(form: form)
                             }
@@ -125,6 +143,7 @@ struct ServiceView: View {
                     }
                 }
             }
+            .refreshable { await loadServiceHours() }
             .navigationTitle("Community Service")
             .inlineNavigationBarTitle()
             .toolbar {
@@ -158,7 +177,26 @@ struct ServiceView: View {
                     PDFViewer(url: pdfURL ?? URL(string: "about:blank")!, appInfo: appInfo)
                         .navigationTitle("Service Record")
                         .inlineNavigationBarTitle()
-                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPDF = false } } }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button {
+                                    guard let pdfURL else { return }
+                                    isPreparingPDFShare = true
+                                    Task {
+                                        pdfShareFileURL = await downloadPDFForSharing(url: pdfURL, appInfo: appInfo)
+                                        isPreparingPDFShare = false
+                                        if pdfShareFileURL != nil { showPDFShare = true }
+                                    }
+                                } label: {
+                                    if isPreparingPDFShare { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
+                                }
+                                .disabled(pdfURL == nil || isPreparingPDFShare)
+                            }
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { showPDF = false } }
+                        }
+                        .sheet(isPresented: $showPDFShare) {
+                            if let pdfShareFileURL { ShareSheet(items: [pdfShareFileURL]) }
+                        }
                 }
             }
             .onAppear {
@@ -337,7 +375,15 @@ struct CreateFormSheet: View {
 
     var hasOutsideService: Bool { selectedServices.contains { $0.description == "Outside Community Service" } }
     var totalHours: Double { selectedServices.reduce(0) { $0 + $1.hours } }
-    var canSubmit: Bool { !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty }
+    var canSubmit: Bool {
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty &&
+        !advisorName.isEmpty &&
+        !selectedSLOs.isEmpty &&
+        !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+    }
 
     var body: some View {
         NavigationStack {
@@ -537,7 +583,15 @@ struct EditAndResubmitSheet: View {
 
     var hasOutsideService: Bool { services.contains { $0.description == "Outside Community Service" } }
     var totalHours: Double { services.reduce(0) { $0 + $1.hours } }
-    var canSubmit: Bool { !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty }
+    var canSubmit: Bool {
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty &&
+        !advisorName.isEmpty &&
+        !selectedSLOs.isEmpty &&
+        !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+    }
 
     var body: some View {
         NavigationStack {

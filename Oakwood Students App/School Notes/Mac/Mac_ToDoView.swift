@@ -81,6 +81,12 @@ struct Mac_ToDoView: View {
             .padding()
         }
         .navigationTitle("To Do")
+        .refreshable {
+            await syncCookies()
+            _ = await appInfo.loadCourses()
+            _ = await appInfo.loadAllAssignments()
+            await appInfo.loadResourceAssignmentIds()
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(showAll ? "Hide Done" : "Show All") {

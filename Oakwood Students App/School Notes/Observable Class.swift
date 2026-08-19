@@ -286,7 +286,9 @@ class AppInfo: ObservableObject {
         }
 
         let capturedInfo = info
-        Task { await AppInfo.indexEntities(courses: loadedCourses, info: capturedInfo) }
+        if #available(iOS 27.0, macOS 27.0, *) {
+            Task { await AppInfo.indexEntities(courses: loadedCourses, info: capturedInfo) }
+        }
     }
 
     private func saveAssignmentInfo() {
@@ -728,10 +730,13 @@ class AppInfo: ObservableObject {
         }
         await MainActor.run { saveAssignmentsForWidget() }
         let snapshot = await MainActor.run { (courses: self.courses, info: self.info) }
-        Task { await AppInfo.indexEntities(courses: snapshot.courses, info: snapshot.info) }
+        if #available(iOS 27.0, macOS 27.0, *) {
+            Task { await AppInfo.indexEntities(courses: snapshot.courses, info: snapshot.info) }
+        }
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
+    @available(iOS 27.0, macOS 27.0, *)
     static func indexEntities(courses: [Course], info: [Int: Bool]) async {
         let assignments = courses.flatMap { course in
             (course.assignments ?? []).map { assignment -> AssignmentEntity in

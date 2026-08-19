@@ -89,6 +89,7 @@ struct Mac_CalendarView: View {
             }
         }
         .navigationTitle("Calendar")
+        .refreshable { await appInfo.loadAllCalendarEvents() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button { showingFilter = true } label: { Image(systemName: filterIconName) }

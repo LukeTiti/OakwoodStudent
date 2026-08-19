@@ -58,6 +58,7 @@ struct Mac_ClubsView: View {
                 }
             }
             .navigationTitle("Clubs")
+            .refreshable { await loadClubs() }
             .toolbar {
                 if isSuperAdmin {
                     ToolbarItem(placement: .confirmationAction) {
