@@ -29,15 +29,29 @@ final class CloudSync<Value: Codable> {
     /// refresh) to reconcile with whatever CloudKit has, and get back the merged value. Also
     /// pushes the merged result back so every device converges.
     func reconcile(local: Value) async -> Value {
-        guard let remote = await remoteValue() else {
+        switch await fetchRemote() {
+        case .found(let remote):
+            let merged = merge(local, remote)
+            print("[CloudSync:\(key)] reconcile: found remote value, merged with local")
+            await push(merged)
+            return merged
+        case .notFound:
+            // Confirmed via CKError.unknownItem — no record exists anywhere yet, so this really
+            // is the first sync ever for this key. Safe to seed CloudKit with local.
             print("[CloudSync:\(key)] reconcile: no remote value found — pushing local")
             await push(local)
             return local
+        case .failed:
+            // Couldn't confirm what's actually on the server — a network blip, throttling, a
+            // decode failure, anything short of a confirmed "no record." Must NOT push here:
+            // treating this the same as .notFound would silently overwrite whatever another
+            // device already pushed (possibly newer, possibly containing edits this device has
+            // never seen) with this device's own comparatively stale local view — a real data
+            // loss bug, not just a missed update. Just return local for now; the next successful
+            // poll (12s later) will fetch the real remote state and merge properly.
+            print("[CloudSync:\(key)] reconcile: fetch failed — skipping push, using local only for now")
+            return local
         }
-        let merged = merge(local, remote)
-        print("[CloudSync:\(key)] reconcile: found remote value, merged with local")
-        await push(merged)
-        return merged
     }
 
     /// Call after any local mutation to push the new value to CloudKit.
@@ -58,26 +72,40 @@ final class CloudSync<Value: Codable> {
         }
     }
 
-    func remoteValue() async -> Value? {
+    /// Three-way result instead of a plain `Value?` — collapsing "genuinely no record yet" and
+    /// "the fetch failed for some other reason" into the same `nil` is exactly what let `reconcile`
+    /// treat a transient error as license to push local over whatever's really on the server.
+    private enum RemoteFetchResult {
+        case found(Value)
+        case notFound
+        case failed
+    }
+
+    private func fetchRemote() async -> RemoteFetchResult {
         do {
             let record = try await database.record(for: recordID)
             guard let data = record["payload"] as? Data else {
                 print("[CloudSync:\(key)] remoteValue: record found but no payload")
-                return nil
+                return .failed
             }
             guard let decoded = try? JSONDecoder().decode(Value.self, from: data) else {
                 print("[CloudSync:\(key)] remoteValue: found \(data.count) bytes but FAILED to decode")
-                return nil
+                return .failed
             }
             print("[CloudSync:\(key)] remoteValue: found \(data.count) bytes, decoded OK")
-            return decoded
+            return .found(decoded)
         } catch let error as CKError where error.code == .unknownItem {
             print("[CloudSync:\(key)] remoteValue: no record in CloudKit yet")
-            return nil
+            return .notFound
         } catch {
             print("[CloudSync:\(key)] remoteValue: FAILED — \(error)")
-            return nil
+            return .failed
         }
+    }
+
+    func remoteValue() async -> Value? {
+        if case .found(let value) = await fetchRemote() { return value }
+        return nil
     }
 
     /// Removes this value's record from CloudKit entirely — used by the debug "reset all

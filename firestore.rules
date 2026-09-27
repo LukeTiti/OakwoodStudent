@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /serviceForms/{formId} {
+      allow read, create, delete: if true;
+
+      // The public /sign/<id> page (public/sign/index.html) is unauthenticated by design — an
+      // outside supervisor clicks an emailed link with no account of their own. Its own JS only
+      // ever writes these 5 fields on a pending_signature -> pending transition, but that page's
+      // Firebase config (project ID + API key) is plainly visible via "View Source", so nothing
+      // stops someone from skipping the page's UI entirely and firing a raw Firestore write with
+      // the same credentials. This rule is what actually enforces the narrow shape server-side,
+      // regardless of how the write is sent — the page's own JS was never a real boundary.
+      //
+      // Every other status transition on this collection (resubmission, advisor approve/reject,
+      // submitFormToAdvisor, the Veracross record-id write-back) is untouched by this rule, since
+      // none of them start from "pending_signature".
+      allow update: if resource.data.status != 'pending_signature'
+        || (
+          request.resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['supervisorSignature', 'signerEmail', 'signatureImage', 'signedAt', 'status'])
+        );
+    }
+
+    // Everything else (every other collection) is unchanged from before this rule — see the
+    // app's own security review notes for why that's still an open item, tracked separately.
+    //
+    // Must exclude serviceForms explicitly: Firestore ORs every `match` block that applies to
+    // a given path rather than letting a narrower block override a broader one, so a blanket
+    // `match /{document=**}` here would silently grant serviceForms writes regardless of what
+    // the block above says (confirmed the hard way — this exact mistake shipped once already).
+    match /{collection}/{document=**} {
+      allow read, write: if collection != 'serviceForms';
+    }
+  }
+}

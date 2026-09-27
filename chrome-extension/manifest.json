@@ -2,9 +2,19 @@
   "manifest_version": 3,
   "name": "Oakwood Advisor – Veracross Bridge",
   "version": "0.10.0",
-  "description": "v0.10: pulls real pending serviceForms submissions from Firestore and posts them to Veracross via the advisor's own tab session.",
+  "description": "Lets Oakwood advisors review pending community service submissions and post approved hours to Veracross.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "permissions": [
     "activeTab",

@@ -67,25 +67,35 @@
     const app_el = document.getElementById("app");
 
     async function load() {
-      if (!docId || docId === "sign") { showError("Invalid signing link."); return; }
+      try {
+        if (!docId || docId === "sign") { showError("Invalid signing link."); return; }
 
-      const ref = doc(db, "serviceForms", docId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) { showError("Form not found. This link may have expired."); return; }
+        const ref = doc(db, "serviceForms", docId);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) { showError("Form not found. This link may have expired."); return; }
 
-      const d = snap.data();
+        const d = snap.data();
 
-      if (d.status === "signed" || d.status === "pending" || d.status === "approved" || d.status === "rejected") {
-        showAlreadySigned(d);
-        return;
+        if (d.status === "signed" || d.status === "pending" || d.status === "approved" || d.status === "rejected") {
+          showAlreadySigned(d);
+          return;
+        }
+
+        if (d.status !== "pending_signature") {
+          showError("This form is not currently awaiting a signature.");
+          return;
+        }
+
+        renderForm(d, ref);
+      } catch (e) {
+        // getDoc() had no error handling at all before this — any rejection (a flaky
+        // connection, a momentary Firestore hiccup) left the page stuck on the static
+        // "Loading form…" markup forever, with no indication anything was wrong and no
+        // way forward short of guessing to hit refresh. A real external supervisor
+        // shouldn't have to know that trick.
+        console.error("Failed to load signing form:", e);
+        showError("Couldn't load this form. Please check your connection and try again.", true);
       }
-
-      if (d.status !== "pending_signature") {
-        showError("This form is not currently awaiting a signature.");
-        return;
-      }
-
-      renderForm(d, ref);
     }
 
     function renderForm(d, ref) {
@@ -238,12 +248,13 @@
         </div>`;
     }
 
-    function showError(msg) {
+    function showError(msg, retry) {
       app_el.innerHTML = `
         <div class="status">
           <div class="status-icon">❌</div>
           <h2>Error</h2>
           <p>${msg}</p>
+          ${retry ? `<button onclick="location.reload()">Try Again</button>` : ""}
         </div>`;
     }
 

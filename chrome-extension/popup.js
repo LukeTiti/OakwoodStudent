@@ -12,17 +12,31 @@ const PERSON_PK = 39950;
 const TEST_RECORD_PK = 11261;
 const FIREBASE_PROJECT_ID = "oakwoodstudents-d9495";
 
-// Advisor roster — keep in sync with FirebaseService.swift's advisorList.
-const ADVISOR_LIST = ["Mr. Hubbard", "Mrs. Call", "Mr. Willis", "Dr. Pak", "Mr. Clink"];
+// Advisor roster — keep in sync with FirebaseService.swift's advisorList. Last names only,
+// deliberately no titles — see that file's comment for why.
+const ADVISOR_LIST = [
+  // 9th grade
+  "Calvillo", "Hammerbeck", "Hashem", "Sedik/Velez", "Wilmot",
+  // 10th grade
+  "Call", "Day", "Pak",
+  // 11th grade
+  "Clink", "Furtado", "Gastelum", "Hubbard",
+  // 12th grade
+  "de Bree", "Dehpanah", "Kuruvilla", "Sotelo"
+];
 
-// Reusing the same values already proven to work against a real Veracross
-// record via the hardcoded Test Create button (see commit "Prove Veracross
-// write path via extension") — good enough for a first real end-to-end
-// test with real student names/hours. Revisit via the Lookup Value Lists
-// button once there's a reason to believe these aren't the right codes for
-// every category/grading period going forward (e.g. a new school year).
-const VOLUNTEER_JOB_CATEGORY = 3;
-const GRADING_PERIOD = 50;
+// Real Veracross value-list codes. These replace the earlier guesses — category 3
+// for every entry, and grading period 50, which was never a valid period at all.
+//
+// volunteer_job_category: the app's Type picker stores exactly one of two labels on
+// every entry — see `descriptions` in AddServiceSheet (Community Service.swift).
+const JOB_CATEGORY_OAKWOOD = 3;   // "Oakwood Service" — on campus
+const JOB_CATEGORY_OUTSIDE = 4;   // "Outside Community Service" — off campus
+
+// grading_period: the same ids the student portal uses for its attendance documents
+// (see the Documents section of Veracross.swift), so they're corroborated twice over.
+const GRADING_PERIOD_SEMESTER_1 = 2;
+const GRADING_PERIOD_SEMESTER_2 = 6;
 
 const pullBtn = document.getElementById("pullBtn");
 const updateBtn = document.getElementById("updateBtn");
@@ -196,7 +210,7 @@ function updateInPage(recordPk, notes, hours) {
 // signals "create"; the response's completed[0].record_pk is the new id.
 // field_alias "26269" (field_info_fk 1206) is the odd one — that's the
 // field that actually ties the new row to a student.
-function createInPage(personPK, hours, notes, volunteerDate, jobCategory, gradingPeriod, schoolYear) {
+function createInPage(personPK, hours, notes, volunteerDate, jobCategory, gradingPeriod, schoolYear, organizationKey) {
   return (async () => {
     const token = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!token) {
@@ -214,7 +228,10 @@ function createInPage(personPK, hours, notes, volunteerDate, jobCategory, gradin
         { field_alias: "volunteer_job_category", field_info_fk: 1208, path_fk_list: "", value: jobCategory },
         { field_alias: "volunteer_hours", field_info_fk: 1209, path_fk_list: "", value: hours },
         { field_alias: "approved", field_info_fk: 11945, path_fk_list: "", value: true },
-        { field_alias: "organization_key", field_info_fk: 12261, path_fk_list: "", value: 0 },
+        // Real value-list key from Firestore's serviceForms.organizationKey (see the app's
+        // ServiceOrganization picker / oakwoodOrganizationKey) — 0 (blank) only for forms
+        // submitted before that field existed.
+        { field_alias: "organization_key", field_info_fk: 12261, path_fk_list: "", value: organizationKey || 0 },
         { field_alias: "volunteer_date", field_info_fk: 1207, path_fk_list: "", value: volunteerDate },
         { field_alias: "notes", field_info_fk: 1210, path_fk_list: "", value: notes }
       ],
@@ -383,6 +400,26 @@ function computeSchoolYear(dateStr) {
   if (isNaN(d)) return null;
   const month = d.getUTCMonth() + 1; // 1-12
   return month >= 7 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+}
+
+// Semester 2 starts in January, so Jan-Jun is Semester 2 and Jul-Dec is Semester 1.
+// Deliberately the same July boundary computeSchoolYear uses: a date therefore always
+// lands in a semester that belongs to the school year reported alongside it, rather
+// than the two fields being free to disagree.
+function computeGradingPeriod(dateStr) {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  const month = d.getUTCMonth() + 1; // 1-12
+  return month >= 7 ? GRADING_PERIOD_SEMESTER_1 : GRADING_PERIOD_SEMESTER_2;
+}
+
+// "Outside Community Service" is the app's exact label for off-campus work; anything
+// else is on-campus Oakwood Service. Matching on the off-campus label (rather than the
+// Oakwood one) means an unrecognised or empty description falls back to Oakwood — the
+// safer miss, since "outside" is the category carrying the tax-ID/organization
+// expectations and shouldn't be claimed for an entry that never supplied them.
+function jobCategoryFor(description) {
+  return description === "Outside Community Service" ? JOB_CATEGORY_OUTSIDE : JOB_CATEGORY_OAKWOOD;
 }
 
 function normalizeDate(dateStr) {
@@ -654,8 +691,12 @@ async function approveForm(form, btn) {
     const successFlags = [];
     const updatedServices = [];
     let anyNewIds = false;
+    // The Veracross `notes` field carries the form name and nothing else. The service
+    // type used to be prefixed here, but volunteer_job_category now records that
+    // properly, so repeating it in free text would only duplicate it.
+    const notes = form.title;
+
     for (const service of form.services || []) {
-      const notes = [service.description, service.notes].filter(Boolean).join(" — ");
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: createInPage,
@@ -664,9 +705,10 @@ async function approveForm(form, btn) {
           service.hours,
           notes,
           normalizeDate(service.date),
-          VOLUNTEER_JOB_CATEGORY,
-          GRADING_PERIOD,
-          computeSchoolYear(service.date)
+          jobCategoryFor(service.description),
+          computeGradingPeriod(service.date),
+          computeSchoolYear(service.date),
+          form.organizationKey
         ]
       });
       const { success, recordPk } = parseCreateResult(result);
@@ -846,7 +888,7 @@ createBtn.addEventListener("click", async () => {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: createInPage,
-      args: [PERSON_PK, hours, notes, today, 3, 50, 2026]
+      args: [PERSON_PK, hours, notes, today, JOB_CATEGORY_OAKWOOD, computeGradingPeriod(today), computeSchoolYear(today)]
     });
 
     if (!result.ok) {
@@ -876,7 +918,11 @@ lookupBtn.addEventListener("click", async () => {
   const lists = [
     { id: 1208, label: "volunteer_job_category" },
     { id: 3439, label: "school_year" },
-    { id: 3440, label: "grading_period" }
+    { id: 3440, label: "grading_period" },
+    // organization_key is still posted as 0 (i.e. blank) on every record. Reading its
+    // value list is the first step to filling it properly — it tells us whether the
+    // field wants a key from a fixed list of organizations, and what those keys are.
+    { id: 12261, label: "organization_key" }
   ];
 
   try {

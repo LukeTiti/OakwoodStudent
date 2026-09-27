@@ -252,11 +252,40 @@ class AppInfo: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    private var reconcileInFlight: Task<Void, Never>?
+
     /// Pulls whatever's currently in CloudKit and merges it with local state. Called at launch,
     /// from the foreground poll loop below, and from the manual refresh buttons on Mac's
     /// To Do/Calendar views. Each fetch is a real network round trip to CloudKit's servers, not
     /// a local cache read, so this is what actually detects a remote change.
+    ///
+    /// Coalesces overlapping calls into a single in-flight reconcile rather than racing multiple
+    /// concurrent ones — launch's immediate call, the 12s poll tick, and a manual pull-to-refresh
+    /// can all land close together, and two overlapping reconciles each doing their own
+    /// fetch-merge-push can genuinely lose data: whichever push lands last on CloudKit wins,
+    /// even if it was computed from a staler remote snapshot than the other one saw.
     func reconcileCloudSync() async {
+        // reconcileInFlight is plain (non-actor-isolated) state on a class with no @MainActor
+        // annotation, so every touch goes through MainActor.run — matching how every other piece
+        // of shared state in this class is already guarded — rather than risking a data race if
+        // two callers land on different threads at once.
+        let existing = await MainActor.run { reconcileInFlight }
+        if let existing {
+            await existing.value
+            return
+        }
+        // `if let self { ... }` rather than `await self?.foo()` — the latter is an expression of
+        // type Void?, which makes the Task's type Task<Void?, Never> instead of Task<Void, Never>
+        // and fails to type-check against `reconcileInFlight: Task<Void, Never>?` below.
+        let task = Task { [weak self] in
+            if let self { await self.performCloudSyncReconcile() }
+        }
+        await MainActor.run { reconcileInFlight = task }
+        await task.value
+        await MainActor.run { reconcileInFlight = nil }
+    }
+
+    private func performCloudSyncReconcile() async {
         let (localInfo, localNotes, localClubs, localLastViewed, localCalendar, localServiceList,
              localCustomAssignments, localClassColors, localShowAllDefault) = await MainActor.run {
             (infoTimestamps, notesTimestamps, followedClubTimestamps, lastViewedClubAt,
@@ -283,18 +312,41 @@ class AppInfo: ObservableObject {
                    mergedCustomAssignments, mergedClassColors, mergedShowAllDefault)
 
         await MainActor.run {
+            // resolvedInfo/resolvedNotes/resolvedClassColors/resolvedClubs were merged against a
+            // *snapshot* of local state taken before the network round trips above (fetch + push,
+            // each a real trip to CloudKit — easily a second or more). If the user toggled an
+            // assignment, added a note, etc. while that was in flight, the live `infoTimestamps`
+            // (etc.) here already has that edit with a fresh timestamp, but `resolvedInfo` doesn't
+            // know about it — so assigning `resolvedInfo` straight over `infoTimestamps` would
+            // silently revert the in-flight edit (this is why a just-checked assignment could
+            // uncheck itself moments later). Re-merging against the current value one more time,
+            // right before writing, keeps whichever side's per-key timestamp is actually newest.
+            let mergedInfo = mergeLWW(infoTimestamps, resolvedInfo)
+            let mergedNotes = mergeLWW(notesTimestamps, resolvedNotes)
+            let mergedClassColors = mergeLWW(classColorTimestamps, resolvedClassColors)
+            let mergedClubs = mergeLWW(followedClubTimestamps, resolvedClubs)
+
             isApplyingCloudMerge = true
-            infoTimestamps = resolvedInfo
-            info = Dictionary(uniqueKeysWithValues: resolvedInfo.compactMap { key, entry in entry.value.map { (key, $0) } })
-            notesTimestamps = resolvedNotes
-            assignmentNotes = Dictionary(uniqueKeysWithValues: resolvedNotes.compactMap { key, entry in entry.value.map { (key, $0) } })
-            classColorTimestamps = resolvedClassColors
-            classColors = Dictionary(uniqueKeysWithValues: resolvedClassColors.compactMap { key, entry in entry.value.map { (key, $0) } })
+            infoTimestamps = mergedInfo
+            info = Dictionary(uniqueKeysWithValues: mergedInfo.compactMap { key, entry in entry.value.map { (key, $0) } })
+            notesTimestamps = mergedNotes
+            assignmentNotes = Dictionary(uniqueKeysWithValues: mergedNotes.compactMap { key, entry in entry.value.map { (key, $0) } })
+            classColorTimestamps = mergedClassColors
+            classColors = Dictionary(uniqueKeysWithValues: mergedClassColors.compactMap { key, entry in entry.value.map { (key, $0) } })
             todoDefaultShowAllTimestamp = resolvedShowAllDefault.updatedAt
             todoDefaultShowAll = resolvedShowAllDefault.value ?? false
-            followedClubTimestamps = resolvedClubs
-            followedClubIDs = Set(resolvedClubs.compactMap { key, entry in entry.value == true ? key : nil })
+            followedClubTimestamps = mergedClubs
+            followedClubIDs = Set(mergedClubs.compactMap { key, entry in entry.value == true ? key : nil })
             isApplyingCloudMerge = false
+            // Explicit, now that isApplyingCloudMerge above suppressed each one's normal automatic
+            // push — CloudSync.reconcile() already pushed each resolved* value itself, but the
+            // re-merge against live state just above can be newer specifically when the user
+            // edited during the network round trip; this is what actually propagates an in-flight
+            // edit instead of losing it until the next poll.
+            scheduleAssignmentInfoPush()
+            scheduleAssignmentNotesPush()
+            scheduleClassColorsPush()
+            scheduleFollowedClubsPush()
 
             lastViewedClubAt = resolvedLastViewed
             personalCalendarURL = resolvedCalendar.personalCalendarURL
@@ -452,6 +504,27 @@ class AppInfo: ObservableObject {
         }
     }
 
+    private var assignmentInfoPushTask: Task<Void, Never>?
+
+    /// Depth counter (not a plain bool) covering loadAllAssignments()'s course-by-course loop —
+    /// suppresses the per-mutation CloudKit push schedule while > 0. Local persistence to
+    /// UserDefaults still happens immediately on every change either way. A counter rather than a
+    /// bool matters because Grades now refreshes on every tab appearance, so two overlapping
+    /// loadAllAssignments() calls are possible; with a plain bool, whichever finishes first would
+    /// prematurely flip it back off while the other is still mid-loop, reopening the exact race
+    /// this exists to close.
+    ///
+    /// Why this exists on top of the 800ms debounce: that debounce coalesces a tight burst of
+    /// same-tick mutations, but loadAllAssignments() loads courses ONE AT A TIME, each a separate
+    /// network round trip — easily seconds apart, far longer than 800ms. A student's very first
+    /// course finishing would fire its own debounced push containing just that one course's
+    /// handful of newly-initialized assignments, genuinely overwriting CloudKit's real, complete
+    /// record with a tiny fragment, seconds before the remaining courses even start loading. Any
+    /// other device reconciling in that window would merge against that fragment as if it were
+    /// the whole truth — this is what was making completions vanish for the ~30s it took every
+    /// course to finish loading, self-correcting only once the last course's initialization ran.
+    private var bulkLoadingAssignmentsDepth = 0
+
     private func saveAssignmentInfo() {
         if let encoded = try? JSONEncoder().encode(info) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfo")
@@ -459,20 +532,47 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(infoTimestamps) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentInfoTimestamps")
         }
+        // isApplyingCloudMerge means this write came from applying already-reconciled data (a
+        // fresh local load, or a CloudKit reconcile's own merge result) rather than a real user
+        // edit — pushing here would risk re-sending a snapshot from mid-assignment (see
+        // loadAssignmentInfo()'s load-order comment) instead of the final, fully-settled state.
+        // performCloudSyncReconcile() explicitly schedules its own push once it's done applying.
+        guard !isApplyingCloudMerge, bulkLoadingAssignmentsDepth == 0 else { return }
+        scheduleAssignmentInfoPush()
+    }
+
+    /// Local persistence happens instantly on every change, but the iCloud push is debounced —
+    /// same reasoning as saveAssignmentNotes() below: a tight burst of same-tick mutations (e.g.
+    /// several assignments initialized within one course) collapses into a single push of the
+    /// final state, instead of a storm of racing, mostly-failing "Zone Busy"/CAS-conflict pushes
+    /// all hitting the same CloudKit record at once.
+    private func scheduleAssignmentInfoPush() {
+        assignmentInfoPushTask?.cancel()
         let snapshot = infoTimestamps
-        Task { await assignmentCloudSync.push(snapshot) }
+        assignmentInfoPushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self else { return }
+            await self.assignmentCloudSync.push(snapshot)
+        }
     }
 
     private func loadAssignmentInfo() {
         isApplyingCloudMerge = true
         defer { isApplyingCloudMerge = false }
-        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfo"),
-           let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
-            info = decoded
-        }
+        // infoTimestamps MUST load before info: info's didSet fires saveAssignmentInfo()
+        // synchronously and immediately, which reads infoTimestamps for its push snapshot — if
+        // info were assigned first, that snapshot would be captured before infoTimestamps had
+        // even been read from disk yet (still its freshly-constructed empty default), scheduling
+        // a push of empty/stale timestamps regardless of what actually gets loaded a line later.
+        // This fired on essentially every launch and is what was overwriting CloudKit's real,
+        // complete assignmentInfo record with a near-empty one in the first moments after launch.
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfoTimestamps"),
            let decoded = try? JSONDecoder().decode([Int: LWW<Bool>].self, from: data) {
             infoTimestamps = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentInfo"),
+           let decoded = try? JSONDecoder().decode([Int: Bool].self, from: data) {
+            info = decoded
         }
     }
 
@@ -489,6 +589,13 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(notesTimestamps) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "assignmentNotesTimestamps")
         }
+        // See saveAssignmentInfo()'s identical guard — a merge-driven write shouldn't schedule its
+        // own push here; performCloudSyncReconcile() explicitly pushes once it's fully applied.
+        guard !isApplyingCloudMerge else { return }
+        scheduleAssignmentNotesPush()
+    }
+
+    private func scheduleAssignmentNotesPush() {
         assignmentNotesPushTask?.cancel()
         let snapshot = notesTimestamps
         assignmentNotesPushTask = Task { [weak self] in
@@ -501,13 +608,16 @@ class AppInfo: ObservableObject {
     private func loadAssignmentNotes() {
         isApplyingCloudMerge = true
         defer { isApplyingCloudMerge = false }
-        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotes"),
-           let decoded = try? JSONDecoder().decode([Int: String].self, from: data) {
-            assignmentNotes = decoded
-        }
+        // notesTimestamps before assignmentNotes — same load-order hazard fixed in
+        // loadAssignmentInfo(): assignmentNotes' didSet reads notesTimestamps for its push
+        // snapshot, synchronously, before the next line below would otherwise populate it.
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotesTimestamps"),
            let decoded = try? JSONDecoder().decode([Int: LWW<String>].self, from: data) {
             notesTimestamps = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "assignmentNotes"),
+           let decoded = try? JSONDecoder().decode([Int: String].self, from: data) {
+            assignmentNotes = decoded
         }
     }
 
@@ -524,6 +634,8 @@ class AppInfo: ObservableObject {
 
     // MARK: - Class Colors
 
+    private var classColorsPushTask: Task<Void, Never>?
+
     private func saveClassColors() {
         if let encoded = try? JSONEncoder().encode(classColors) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "classColors")
@@ -531,20 +643,35 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(classColorTimestamps) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "classColorsTimestamps")
         }
+        // Same reasoning as saveAssignmentInfo()/saveAssignmentNotes(): debounce so a burst of
+        // per-key mutations collapses into one push instead of racing CloudKit writes, and skip
+        // entirely during a merge-driven write (performCloudSyncReconcile() pushes explicitly).
+        guard !isApplyingCloudMerge else { return }
+        scheduleClassColorsPush()
+    }
+
+    private func scheduleClassColorsPush() {
+        classColorsPushTask?.cancel()
         let snapshot = classColorTimestamps
-        Task { await classColorsCloudSync.push(snapshot) }
+        classColorsPushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self else { return }
+            await self.classColorsCloudSync.push(snapshot)
+        }
     }
 
     private func loadClassColors() {
         isApplyingCloudMerge = true
         defer { isApplyingCloudMerge = false }
-        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "classColors"),
-           let decoded = try? JSONDecoder().decode([String: CodableColor].self, from: data) {
-            classColors = decoded
-        }
+        // classColorTimestamps before classColors — same load-order hazard as
+        // loadAssignmentInfo(): classColors' didSet reads classColorTimestamps synchronously.
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "classColorsTimestamps"),
            let decoded = try? JSONDecoder().decode([String: LWW<CodableColor>].self, from: data) {
             classColorTimestamps = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "classColors"),
+           let decoded = try? JSONDecoder().decode([String: CodableColor].self, from: data) {
+            classColors = decoded
         }
     }
 
@@ -573,6 +700,8 @@ class AppInfo: ObservableObject {
 
     // MARK: - Followed Clubs
 
+    private var followedClubsPushTask: Task<Void, Never>?
+
     private func saveFollowedClubIDs() {
         if let encoded = try? JSONEncoder().encode(followedClubIDs) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "followedClubIDs")
@@ -580,20 +709,34 @@ class AppInfo: ObservableObject {
         if let encoded = try? JSONEncoder().encode(followedClubTimestamps) {
             UserDefaults(suiteName: appGroupID)?.set(encoded, forKey: "followedClubTimestamps")
         }
+        // Same reasoning as saveAssignmentInfo()/saveClassColors(): debounce, and skip entirely
+        // during a merge-driven write (performCloudSyncReconcile() pushes explicitly).
+        guard !isApplyingCloudMerge else { return }
+        scheduleFollowedClubsPush()
+    }
+
+    private func scheduleFollowedClubsPush() {
+        followedClubsPushTask?.cancel()
         let snapshot = followedClubTimestamps
-        Task { await followedClubsCloudSync.push(snapshot) }
+        followedClubsPushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self else { return }
+            await self.followedClubsCloudSync.push(snapshot)
+        }
     }
 
     private func loadFollowedClubIDs() {
         isApplyingCloudMerge = true
         defer { isApplyingCloudMerge = false }
-        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
-           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            followedClubIDs = decoded
-        }
+        // followedClubTimestamps before followedClubIDs — same load-order hazard as
+        // loadAssignmentInfo(): followedClubIDs' didSet reads followedClubTimestamps synchronously.
         if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubTimestamps"),
            let decoded = try? JSONDecoder().decode([String: LWW<Bool>].self, from: data) {
             followedClubTimestamps = decoded
+        }
+        if let data = UserDefaults(suiteName: appGroupID)?.data(forKey: "followedClubIDs"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            followedClubIDs = decoded
         }
     }
 
@@ -980,18 +1123,31 @@ class AppInfo: ObservableObject {
         }
     }
 
-    /// Initializes completion status for assignments in a given course.
-    /// Marks assignments with a raw_score as complete, and "Not Turned In" as incomplete.
+    /// Initializes completion status for assignments in a given course, the FIRST time each one
+    /// is ever seen — skips any assignment that already has an infoTimestamps entry, whether that
+    /// came from this device or synced in from another. Marks a never-before-seen assignment with
+    /// a raw_score, or "Turned In", as complete.
+    ///
+    /// Two things this deliberately does NOT do, both learned the hard way:
+    /// - Doesn't write an explicit `false` for "Not Turned In"/unknown assignments — every read
+    ///   site already treats an absent key as incomplete (`info[id, default: false]`).
+    /// - Doesn't re-assert `true` on every reload for an assignment that already has an entry.
+    ///   This function runs every time grades load — which, since Grades now refreshes on every
+    ///   tab appearance (not just once per session), is far more often than it used to. Previously
+    ///   it force-set `info[id] = true` unconditionally for anything graded/turned-in, EVERY time,
+    ///   which (a) silently overrode a student's own deliberate "mark incomplete" on an already-
+    ///   graded assignment the moment grades next refreshed, and (b) stamped a brand-new LWW "now"
+    ///   timestamp each time on a value nobody actually just chose. That fake-fresh timestamp could
+    ///   beat a genuinely-different entry from another device on the next CloudKit reconcile (that
+    ///   device just hadn't reloaded grades yet), flipping assignments between done/not-done across
+    ///   devices with no user action — this is what was making completions "come back" unprompted.
     func initializeCompletionStatus(forCourseID courseID: Int) {
         guard let assignments = courses.first(where: { $0.enrollment_pk == courseID })?.assignments else { return }
-        for assignment in assignments {
+        for assignment in assignments where infoTimestamps[assignment.score_id] == nil {
             if let raw = assignment.raw_score, !raw.isEmpty {
                 info[assignment.score_id] = true
             } else if let status = assignment.completion_status, status.hasPrefix("Turned In") {
                 info[assignment.score_id] = true
-            } else if assignment.completion_status == "Not Turned In",
-                      info[assignment.score_id] == nil {
-                info[assignment.score_id] = false
             }
         }
         info = info // force SwiftUI to notice
@@ -1002,6 +1158,7 @@ class AppInfo: ObservableObject {
     func loadAllAssignments() async -> String? {
         var errors: [String] = []
         let courseIDs = courses.compactMap { $0.enrollment_pk }
+        await MainActor.run { bulkLoadingAssignmentsDepth += 1 }
         for courseID in courseIDs {
             if let err = await loadAssignments(courseID: courseID) {
                 errors.append(err)
@@ -1010,6 +1167,13 @@ class AppInfo: ObservableObject {
                     initializeCompletionStatus(forCourseID: courseID)
                 }
             }
+        }
+        // Only once every course has actually finished — and only once every overlapping call to
+        // this function has, per bulkLoadingAssignmentsDepth above — does the real, complete state
+        // get pushed to CloudKit, rather than after each individual course.
+        await MainActor.run {
+            bulkLoadingAssignmentsDepth -= 1
+            if bulkLoadingAssignmentsDepth == 0 { scheduleAssignmentInfoPush() }
         }
         await MainActor.run { saveAssignmentsForWidget() }
         let snapshot = await MainActor.run { (courses: self.courses, info: self.info) }

@@ -8,8 +8,20 @@
 import Foundation
 import FirebaseFirestore
 
-// Advisor roster — update as advisors change
-let advisorList: [String] = ["Mr. Hubbard", "Mrs. Call", "Mr. Willis", "Dr. Pak", "Mr. Clink"]
+// Advisor roster — update as advisors change. Last names only, deliberately no titles
+// (Mr./Mrs./Dr./etc.) — this list is populated from a grade-level roster chart that gives
+// no gender/title info, and guessing wrong would misgender someone. Keep in sync with
+// ADVISOR_LIST in chrome-extension/popup.js.
+let advisorList: [String] = [
+    // 9th grade
+    "Calvillo", "Hammerbeck", "Hashem", "Sedik/Velez", "Wilmot",
+    // 10th grade
+    "Call", "Day", "Pak",
+    // 11th grade
+    "Clink", "Furtado", "Gastelum", "Hubbard",
+    // 12th grade
+    "de Bree", "Dehpanah", "Kuruvilla", "Sotelo"
+]
 
 // Schoolwide Learner Objective categories (from the paper Service Learning Program form, page 2) —
 // multi-select, a single service can reasonably touch more than one.
@@ -19,6 +31,14 @@ let slOptions: [String] = [
     "Community Contributors",
     "Authentic and Resilient Individuals"
 ]
+
+// Veracross's community-service "organization_key" field posts a numeric fk into a fixed
+// value-list (discovered via the admin Chrome extension's "Looking up value lists…" step —
+// see popup.js). Oakwood/on-campus service always resolves to this same key, so it's baked in
+// here rather than living in the `serviceOrganizations` Firestore collection below — a student
+// logging inside hours never needs to pick it themselves.
+let oakwoodOrganizationName = "Oakwood"
+let oakwoodOrganizationKey = 15296
 
 // MARK: - FirebaseService (Handles all Firestore operations)
 class FirebaseService {
@@ -55,6 +75,7 @@ class FirebaseService {
             ]}
         ]
         if let personPK { data["personPK"] = personPK }
+        if let organizationKey = form.organizationKey { data["organizationKey"] = organizationKey }
         let ref = try await db.collection("serviceForms").addDocument(data: data)
         return ref.documentID
     }
@@ -72,6 +93,7 @@ class FirebaseService {
             "reflection3": form.reflection3,
             "taxID": form.taxID ?? "",
             "organization": form.organization ?? "",
+            "organizationKey": (form.organizationKey as Any?) ?? FieldValue.delete(),
             "supervisorName": supervisorName,
             "supervisorEmail": supervisorEmail,
             "advisorName": advisorName,
@@ -128,6 +150,7 @@ class FirebaseService {
             reflection3: data["reflection3"] as? String ?? "",
             taxID: data["taxID"] as? String ?? "",
             organization: data["organization"] as? String ?? "",
+            organizationKey: data["organizationKey"] as? Int,
             services: services,
             supervisorName: data["supervisorName"] as? String ?? "",
             supervisorEmail: data["supervisorEmail"] as? String ?? "",
@@ -138,6 +161,22 @@ class FirebaseService {
             signedAt: (data["signedAt"] as? Timestamp)?.dateValue(),
             rejectionReason: data["rejectionReason"] as? String ?? ""
         )
+    }
+
+    /// Outside-service organizations a student can pick from when logging non-Oakwood hours.
+    /// Grows over time as advisors discover more `organization_key` value-list codes (via the
+    /// admin Chrome extension's "Looking up value lists…" step — see popup.js) and add them here
+    /// through the Firebase console. Oakwood itself is never in this list — see
+    /// `oakwoodOrganizationKey`. `taxID` is optional per-org (also added by hand in the console,
+    /// not by the app) — an org without one stored still shows up in the picker, it just doesn't
+    /// auto-fill the Tax ID field, same as if the student picked an org that's never had one entered.
+    func fetchServiceOrganizations() async throws -> [ServiceOrganization] {
+        let snapshot = try await db.collection("serviceOrganizations").order(by: "name").getDocuments()
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let name = data["name"] as? String, let orgKey = data["orgKey"] as? Int else { return nil }
+            return ServiceOrganization(id: doc.documentID, name: name, orgKey: orgKey, taxID: data["taxID"] as? String)
+        }
     }
 
     // MARK: - Real-time listener for form status updates
@@ -166,6 +205,7 @@ struct SubmittedForm: Identifiable {
     var reflection3: String
     var taxID: String
     var organization: String
+    var organizationKey: Int?  // Veracross organization_key value-list fk — see oakwoodOrganizationKey
     var services: [LocalService]
     var supervisorName: String
     var supervisorEmail: String
@@ -531,13 +571,13 @@ struct ServiceForm: Identifiable, Codable {
     var reflection3: String
     var taxID: String?
     var organization: String?
+    var organizationKey: Int?  // Veracross organization_key value-list fk — see oakwoodOrganizationKey
 }
 
-/// A past (title, organization, tax ID) combo from an outside-service form — tap to
-/// refill all three instead of retyping/remembering the tax ID each time.
-struct OutsideServiceSuggestion: Identifiable {
-    var id: String { "\(title)|\(organization)|\(taxID)" }
-    let title: String
-    let organization: String
-    let taxID: String
+/// One selectable outside-service organization — see FirebaseService.fetchServiceOrganizations().
+struct ServiceOrganization: Identifiable, Codable, Hashable {
+    var id: String
+    var name: String
+    var orgKey: Int
+    var taxID: String?
 }

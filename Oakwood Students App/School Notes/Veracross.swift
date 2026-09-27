@@ -92,20 +92,33 @@ struct VeracrossGradesView: View {
             }
         }
         .onAppear {
-            guard loginState == .checking else { return }
-            if !appInfo.courses.isEmpty {
+            // Only the very first appearance (loginState still .checking) needs to decide
+            // .loggedIn vs .needsLogin. Every later appearance — e.g. switching back to this tab —
+            // used to be a no-op because of an early `guard loginState == .checking`, so a grade
+            // that changed (or a push notification saying "new updates") never actually refetched
+            // until the user manually pulled to refresh. GradeNotificationService's background
+            // check only fires a local notification — it never writes the fetched grades into
+            // appInfo.courses — so this onAppear refresh is the only thing that keeps the visible
+            // list in sync with what triggered that notification.
+            if loginState == .checking, !appInfo.courses.isEmpty {
                 loginState = .loggedIn
+            }
+            switch loginState {
+            case .checking:
                 Task {
                     await appInfo.restorePersistedCookiesIntoStores()
                     await syncCookies()
+                    await loadGrades()
+                    loginState = appInfo.courses.isEmpty ? .needsLogin : .loggedIn
                 }
-                return
-            }
-            Task {
-                await appInfo.restorePersistedCookiesIntoStores()
-                await syncCookies()
-                await loadGrades()
-                loginState = appInfo.courses.isEmpty ? .needsLogin : .loggedIn
+            case .loggedIn:
+                Task {
+                    await appInfo.restorePersistedCookiesIntoStores()
+                    await syncCookies()
+                    await loadGrades()
+                }
+            case .needsLogin:
+                break
             }
         }
     }

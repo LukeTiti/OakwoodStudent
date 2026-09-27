@@ -35,11 +35,28 @@ enum GradeStore {
         return decoded
     }
 
+    static func completionTimestamps() -> [Int: LWW<Bool>] {
+        guard let data = defaults?.data(forKey: "assignmentInfoTimestamps"),
+              let decoded = try? JSONDecoder().decode([Int: LWW<Bool>].self, from: data) else { return [:] }
+        return decoded
+    }
+
     static func setCompletion(scoreId: Int, completed: Bool) {
         var info = completionInfo()
         info[scoreId] = completed
         if let encoded = try? JSONEncoder().encode(info) {
             defaults?.set(encoded, forKey: "assignmentInfo")
+        }
+        // Must also stamp assignmentInfoTimestamps (the LWW dictionary AppInfo's own `info`
+        // didSet maintains) — the CloudKit reconcile in Observable Class.swift merges/pushes
+        // based on THIS dictionary, not `assignmentInfo` itself. Without a fresh timestamp here,
+        // the main app's next reconcile (at launch, or its 12s foreground poll) treats this write
+        // as if it never happened, merges from the older remote/local timestamp, and overwrites
+        // `assignmentInfo` right back over what Siri/Shortcuts just set.
+        var timestamps = completionTimestamps()
+        timestamps[scoreId] = LWW(value: completed, updatedAt: Date())
+        if let encoded = try? JSONEncoder().encode(timestamps) {
+            defaults?.set(encoded, forKey: "assignmentInfoTimestamps")
         }
     }
 

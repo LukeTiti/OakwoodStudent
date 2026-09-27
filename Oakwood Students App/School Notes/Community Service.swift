@@ -59,28 +59,8 @@ struct ServiceView: View {
         }
     }
 
-    /// Past outside-service (title, organization, tax ID) combos, most recent first —
-    /// tax IDs are the actual pain point to retype/remember, and this is where they're
-    /// entered (once per form, only for outside service), so suggestions live here.
-    var outsideServiceSuggestions: [OutsideServiceSuggestion] {
-        var seen = Set<String>()
-        var results: [OutsideServiceSuggestion] = []
-        for form in forms.sorted(by: { $0.submittedAt > $1.submittedAt }) where !form.taxID.isEmpty {
-            let suggestion = OutsideServiceSuggestion(title: form.title, organization: form.organization, taxID: form.taxID)
-            guard seen.insert(suggestion.id).inserted else { continue }
-            results.append(suggestion)
-        }
-        return Array(results.prefix(6))
-    }
-
     var body: some View {
         List {
-                Section {
-                    Text("Currently you cannot submit forms through this app — we're hoping to enable this within the next month. Feel free to add service and you'll be able to submit it once this is enabled.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
-
                 // Logged (pending) hours
                 if !appInfo.localServices.isEmpty {
                     Section {
@@ -105,15 +85,11 @@ struct ServiceView: View {
                         HStack {
                             Text("Logged Hours")
                             Spacer()
-                            // Disabled until form submission is actually enabled — see the
-                            // note at the top of this page.
-                            #if false
                             Button(isSelecting ? "Done" : "Select") {
                                 if isSelecting { selectedIDs.removeAll() }
                                 isSelecting.toggle()
                             }
                             .font(.caption).textCase(.none)
-                            #endif
                         }
                     } footer: {
                         if isSelecting && !selectedIDs.isEmpty {
@@ -174,12 +150,18 @@ struct ServiceView: View {
                     selectedServices: appInfo.localServices.filter { selectedIDs.contains($0.id) },
                     studentId: appInfo.googleVM.userEmail,
                     studentName: appInfo.googleVM.userName,
-                    personPK: appInfo.personPK,
-                    outsideServiceSuggestions: outsideServiceSuggestions
+                    personPK: appInfo.personPK
                 ) { newForm in
                     appInfo.localServices.removeAll { selectedIDs.contains($0.id) }
                     selectedIDs.removeAll(); isSelecting = false
-                    forms.insert(newForm, at: 0)
+                    // The live Firestore listener (startListening(), running the whole time this
+                    // view is on screen) can independently pick up this same just-created doc via
+                    // Firestore's local-cache echo of the pending write — before or after this
+                    // closure runs, there's no guaranteed order. Guard against inserting a second
+                    // copy with the same id; if the listener already has it, do nothing.
+                    if !forms.contains(where: { $0.id == newForm.id }) {
+                        forms.insert(newForm, at: 0)
+                    }
                 }
             }
             .sheet(isPresented: $showPDF) {
@@ -365,7 +347,6 @@ struct CreateFormSheet: View {
     let studentId: String
     let studentName: String
     let personPK: Int?
-    var outsideServiceSuggestions: [OutsideServiceSuggestion] = []
     var onSuccess: (SubmittedForm) -> Void
 
     @State private var title = ""
@@ -377,12 +358,14 @@ struct CreateFormSheet: View {
     @State private var reflection2 = ""
     @State private var reflection3 = ""
     @State private var taxID = ""
-    @State private var organization = ""
+    @State private var organizations: [ServiceOrganization] = []
+    @State private var selectedOrganizationID = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showMail = false
     @State private var pendingMailData: MailData? = nil
 
+    var selectedOrganization: ServiceOrganization? { organizations.first { $0.id == selectedOrganizationID } }
     var hasOutsideService: Bool { selectedServices.contains { $0.description == "Outside Community Service" } }
     var totalHours: Double { selectedServices.reduce(0) { $0 + $1.hours } }
     var canSubmit: Bool {
@@ -392,7 +375,23 @@ struct CreateFormSheet: View {
         !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+        (!hasOutsideService || (!taxID.isEmpty && selectedOrganization != nil))
+    }
+
+    /// Picking an org fills in its stored Tax ID (when the advisor has entered one in Firestore),
+    /// so the student only has to type it themselves when it's genuinely missing. A plain
+    /// `$selectedOrganizationID` binding can't distinguish that from other assignments, so this
+    /// wraps it with the auto-fill as a side effect of an actual pick.
+    private var organizationPickerSelection: Binding<String> {
+        Binding(
+            get: { selectedOrganizationID },
+            set: { newID in
+                selectedOrganizationID = newID
+                if let orgTaxID = organizations.first(where: { $0.id == newID })?.taxID, !orgTaxID.isEmpty {
+                    taxID = orgTaxID
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -408,6 +407,22 @@ struct CreateFormSheet: View {
                         Text("Total Hours"); Spacer()
                         Text("\(totalHours, specifier: "%.1f")").foregroundColor(.secondary)
                     }
+                }
+
+                Section {
+                    if organizations.isEmpty {
+                        Text("Loading organizations…").foregroundColor(.secondary)
+                    } else {
+                        Picker("Organization", selection: organizationPickerSelection) {
+                            Text("Select…").tag("")
+                            ForEach(organizations) { org in
+                                Text(org.name).tag(org.id)
+                            }
+                        }
+                    }
+                    TextField("Tax ID Number", text: $taxID)
+                } header: { Text("Organization") } footer: {
+                    Text("Organization sets Veracross's own internal record for where the service happened — a different number from the Tax ID, which still needs to be entered separately. Required for outside community service hours; leave blank for on-campus hours.")
                 }
 
                 Section {
@@ -457,39 +472,13 @@ struct CreateFormSheet: View {
                     TextField("Did this service connect to or enhance your academic goals or interests? If so, how?", text: $reflection3, axis: .vertical).lineLimit(3...6)
                 } header: { Text("Academic Connection") }
 
-                if hasOutsideService {
-                    if !outsideServiceSuggestions.isEmpty {
-                        Section("Use a Previous Entry") {
-                            ForEach(outsideServiceSuggestions) { suggestion in
-                                Button {
-                                    title = suggestion.title
-                                    organization = suggestion.organization
-                                    taxID = suggestion.taxID
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(suggestion.organization.isEmpty ? suggestion.title : suggestion.organization)
-                                            .foregroundColor(.primary)
-                                        Text("\(suggestion.title) · Tax ID \(suggestion.taxID)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Section {
-                        TextField("Organization Name", text: $organization)
-                        TextField("Tax ID Number", text: $taxID)
-                    } header: { Text("Organization Tax ID") }
-                    footer: { Text("Required for outside community service hours. Tap a previous entry above to fill all three, or type your own.") }
-                }
-
                 if let error = errorMessage {
                     Section { Text(error).foregroundColor(.red) }
                 }
             }
             .navigationTitle("Create Form")
             .inlineNavigationBarTitle()
+            .task { organizations = (try? await FirebaseService.shared.fetchServiceOrganizations()) ?? [] }
             .sheet(isPresented: $showMail, onDismiss: { dismiss() }) {
                 if let data = pendingMailData { MailComposerView(data: data, isPresented: $showMail) }
             }
@@ -507,11 +496,14 @@ struct CreateFormSheet: View {
 
     private func submit() async {
         isSubmitting = true; errorMessage = nil
+        let organizationName = hasOutsideService ? (selectedOrganization?.name ?? "") : oakwoodOrganizationName
+        let organizationKey = hasOutsideService ? selectedOrganization?.orgKey : oakwoodOrganizationKey
         let form = ServiceForm(title: title, dateCreated: Date(), services: selectedServices,
                                slos: Array(selectedSLOs),
                                reflection1: reflection1, reflection2: reflection2, reflection3: reflection3,
                                taxID: hasOutsideService ? taxID : nil,
-                               organization: hasOutsideService ? organization : nil)
+                               organization: hasOutsideService ? organizationName : nil,
+                               organizationKey: organizationKey)
         do {
             let docId = try await FirebaseService.shared.submitServiceForm(
                 form, studentId: studentId, studentName: studentName, personPK: personPK,
@@ -521,7 +513,8 @@ struct CreateFormSheet: View {
                 id: docId, title: title, personPK: personPK, status: "pending_signature", submittedAt: Date(),
                 totalHours: totalHours, slos: Array(selectedSLOs), reflection1: reflection1, reflection2: reflection2,
                 reflection3: reflection3, taxID: hasOutsideService ? taxID : "",
-                organization: hasOutsideService ? organization : "",
+                organization: hasOutsideService ? organizationName : "",
+                organizationKey: organizationKey,
                 services: selectedServices, supervisorName: supervisorName,
                 supervisorEmail: supervisorEmail, advisorName: advisorName, supervisorSignature: "", signerEmail: "", signatureImageBase64: nil,
                 signedAt: nil, rejectionReason: "")
@@ -555,7 +548,6 @@ struct EditAndResubmitSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appInfo: AppInfo
     let form: SubmittedForm
-    var outsideServiceSuggestions: [OutsideServiceSuggestion] = []
     var onSuccess: (SubmittedForm) -> Void
 
     @State private var title: String
@@ -567,16 +559,16 @@ struct EditAndResubmitSheet: View {
     @State private var reflection2: String
     @State private var reflection3: String
     @State private var taxID: String
-    @State private var organization: String
+    @State private var organizations: [ServiceOrganization] = []
+    @State private var selectedOrganizationID = ""
     @State private var services: [LocalService]
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showMail = false
     @State private var pendingMailData: MailData? = nil
 
-    init(form: SubmittedForm, outsideServiceSuggestions: [OutsideServiceSuggestion] = [], onSuccess: @escaping (SubmittedForm) -> Void) {
+    init(form: SubmittedForm, onSuccess: @escaping (SubmittedForm) -> Void) {
         self.form = form
-        self.outsideServiceSuggestions = outsideServiceSuggestions
         self.onSuccess = onSuccess
         _title = State(initialValue: form.title)
         _supervisorName = State(initialValue: form.supervisorName)
@@ -587,10 +579,10 @@ struct EditAndResubmitSheet: View {
         _reflection2 = State(initialValue: form.reflection2)
         _reflection3 = State(initialValue: form.reflection3)
         _taxID = State(initialValue: form.taxID)
-        _organization = State(initialValue: form.organization)
         _services = State(initialValue: form.services)
     }
 
+    var selectedOrganization: ServiceOrganization? { organizations.first { $0.id == selectedOrganizationID } }
     var hasOutsideService: Bool { services.contains { $0.description == "Outside Community Service" } }
     var totalHours: Double { services.reduce(0) { $0 + $1.hours } }
     var canSubmit: Bool {
@@ -600,7 +592,23 @@ struct EditAndResubmitSheet: View {
         !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !reflection2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !reflection3.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        (!hasOutsideService || (!taxID.isEmpty && !organization.isEmpty))
+        (!hasOutsideService || (!taxID.isEmpty && selectedOrganization != nil))
+    }
+
+    /// Same auto-fill-on-pick as CreateFormSheet's organizationPickerSelection. Deliberately NOT
+    /// used for the initial selection made in .task below (which restores this form's own
+    /// already-saved organization/taxID) — only a real user pick through the Picker should ever
+    /// overwrite a Tax ID the student already typed or that came from the form itself.
+    private var organizationPickerSelection: Binding<String> {
+        Binding(
+            get: { selectedOrganizationID },
+            set: { newID in
+                selectedOrganizationID = newID
+                if let orgTaxID = organizations.first(where: { $0.id == newID })?.taxID, !orgTaxID.isEmpty {
+                    taxID = orgTaxID
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -616,6 +624,22 @@ struct EditAndResubmitSheet: View {
                         Text("Total Hours"); Spacer()
                         Text("\(totalHours, specifier: "%.1f")").foregroundColor(.secondary)
                     }
+                }
+
+                Section {
+                    if organizations.isEmpty {
+                        Text("Loading organizations…").foregroundColor(.secondary)
+                    } else {
+                        Picker("Organization", selection: organizationPickerSelection) {
+                            Text("Select…").tag("")
+                            ForEach(organizations) { org in
+                                Text(org.name).tag(org.id)
+                            }
+                        }
+                    }
+                    TextField("Tax ID Number", text: $taxID)
+                } header: { Text("Organization") } footer: {
+                    Text("Organization sets Veracross's own internal record for where the service happened — a different number from the Tax ID, which still needs to be entered separately. Required for outside community service hours; leave blank for on-campus hours.")
                 }
 
                 Section {
@@ -676,38 +700,18 @@ struct EditAndResubmitSheet: View {
                     TextField("Did this service connect to or enhance your academic goals or interests? If so, how?", text: $reflection3, axis: .vertical).lineLimit(3...6)
                 } header: { Text("Academic Connection") }
 
-                if hasOutsideService {
-                    if !outsideServiceSuggestions.isEmpty {
-                        Section("Use a Previous Entry") {
-                            ForEach(outsideServiceSuggestions) { suggestion in
-                                Button {
-                                    organization = suggestion.organization
-                                    taxID = suggestion.taxID
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(suggestion.organization.isEmpty ? suggestion.title : suggestion.organization)
-                                            .foregroundColor(.primary)
-                                        Text("\(suggestion.title) · Tax ID \(suggestion.taxID)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Section {
-                        TextField("Organization Name", text: $organization)
-                        TextField("Tax ID Number", text: $taxID)
-                    } header: { Text("Organization Tax ID") }
-                    footer: { Text("Required for outside community service hours. Tap a previous entry above to fill both, or type your own.") }
-                }
-
                 if let error = errorMessage {
                     Section { Text(error).foregroundColor(.red) }
                 }
             }
             .navigationTitle("Edit & Resubmit")
             .inlineNavigationBarTitle()
+            .task {
+                organizations = (try? await FirebaseService.shared.fetchServiceOrganizations()) ?? []
+                if selectedOrganizationID.isEmpty {
+                    selectedOrganizationID = organizations.first { $0.name == form.organization }?.id ?? ""
+                }
+            }
             .sheet(isPresented: $showMail, onDismiss: { dismiss() }) {
                 if let data = pendingMailData { MailComposerView(data: data, isPresented: $showMail) }
             }
@@ -725,11 +729,14 @@ struct EditAndResubmitSheet: View {
 
     private func submit() async {
         isSubmitting = true; errorMessage = nil
+        let organizationName = hasOutsideService ? (selectedOrganization?.name ?? "") : oakwoodOrganizationName
+        let organizationKey = hasOutsideService ? selectedOrganization?.orgKey : oakwoodOrganizationKey
         let updatedForm = ServiceForm(title: title, dateCreated: form.submittedAt, services: services,
                                slos: Array(selectedSLOs),
                                reflection1: reflection1, reflection2: reflection2, reflection3: reflection3,
                                taxID: hasOutsideService ? taxID : nil,
-                               organization: hasOutsideService ? organization : nil)
+                               organization: hasOutsideService ? organizationName : nil,
+                               organizationKey: organizationKey)
         do {
             try await FirebaseService.shared.resubmitServiceForm(
                 formId: form.id, form: updatedForm,
@@ -743,7 +750,8 @@ struct EditAndResubmitSheet: View {
             resubmittedForm.reflection2 = reflection2
             resubmittedForm.reflection3 = reflection3
             resubmittedForm.taxID = hasOutsideService ? taxID : ""
-            resubmittedForm.organization = hasOutsideService ? organization : ""
+            resubmittedForm.organization = hasOutsideService ? organizationName : ""
+            resubmittedForm.organizationKey = organizationKey
             resubmittedForm.services = services
             resubmittedForm.supervisorName = supervisorName
             resubmittedForm.supervisorEmail = supervisorEmail

@@ -51,17 +51,16 @@ struct Mac_GradesView: View {
                     .frame(minWidth: 480, idealWidth: 760, minHeight: 600, idealHeight: 700)
             }
             .refreshable { await refreshGrades() }
-            .onAppear { Task { await loadIfNeeded() } }
+            // Refresh on every appearance, not just the first time courses is empty — matching
+            // the iOS fix in VeracrossGradesView.onAppear. GradeNotificationService's background
+            // check never writes into appInfo.courses (it only fires a local notification), so
+            // reselecting this tab was the only remaining chance to pick up a change, and the old
+            // "only load once" guard skipped it after the first load.
+            .onAppear { Task { await refreshGrades() } }
         }
     }
 
-    private func loadIfNeeded() async {
-        guard appInfo.courses.isEmpty else { return }
-        await refreshGrades()
-    }
-
-    /// Unconditional reload (unlike loadIfNeeded, which only loads once when empty) —
-    /// used by pull-to-refresh, matching VeracrossGradesView.loadGrades() on iOS.
+    /// Matches VeracrossGradesView.loadGrades() on iOS.
     private func refreshGrades() async {
         await appInfo.restorePersistedCookiesIntoStores()
         await syncCookies()
