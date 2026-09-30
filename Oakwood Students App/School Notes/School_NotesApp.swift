@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import GoogleSignIn
+import FirebaseCore
 
 @main
 struct School_NotesApp: App {
@@ -20,6 +21,14 @@ struct School_NotesApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // Must run before anything touches Auth.auth() (the Google Sign-In -> Firebase Auth
+        // bridge in AppDelegate.swift fires from .onAppear below). Lives here instead of the
+        // platform AppDelegates' launch callbacks because App.init() is the one place both
+        // platforms guarantee runs first — macOS's applicationDidFinishLaunching isn't reliably
+        // early enough relative to SwiftUI's .onAppear.
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(
             clientID: "566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3.apps.googleusercontent.com"
         )

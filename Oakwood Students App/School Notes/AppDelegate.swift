@@ -21,7 +21,10 @@ import UserNotifications
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        FirebaseApp.configure()
+        // FirebaseApp.configure() now happens in School_NotesApp.init() — it must run before
+        // anything touches Auth.auth(), and didFinishLaunchingWithOptions isn't reliably early
+        // enough on macOS (applicationDidFinishLaunching there can fire after SwiftUI's
+        // .onAppear, which is exactly where the Firebase Auth bridge lives).
 
         // Set notification delegate to show alerts while app is open
         UNUserNotificationCenter.current().delegate = self
@@ -120,9 +123,8 @@ import AppKit
 
 // MARK: - macOS AppDelegate
 class MacAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        FirebaseApp.configure()
-    }
+    // FirebaseApp.configure() now happens in School_NotesApp.init() — see the comment on the
+    // iOS AppDelegate's didFinishLaunchingWithOptions for why it moved off this callback.
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
