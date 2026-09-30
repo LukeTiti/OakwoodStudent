@@ -176,6 +176,11 @@ struct SettingsView: View {
                         Text(appVersionString)
                             .foregroundColor(.secondary)
                     }
+                    NavigationLink {
+                        PrivacyView()
+                    } label: {
+                        Text("Privacy")
+                    }
                 }
 
                 Section("Onboarding (Debug)") {
