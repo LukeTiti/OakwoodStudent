@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import GoogleSignIn
 import FirebaseCore
+import FirebaseAuth
 import FirebaseMessaging
 import CloudKit
 
@@ -158,10 +159,45 @@ class GoogleSignInViewModel: ObservableObject {
             self.signInError = "Please sign in with your Oakwood Google account (@oakwoodstudent.org), not a personal Google account."
             return
         }
-        self.signInError = nil
-        self.userName = user.profile?.name ?? ""
-        self.userEmail = email
-        self.isSignedIn = true
+        bridgeToFirebaseAuth(user: user, email: email, name: user.profile?.name ?? "")
+    }
+
+    /// Exchanges the Google ID token for a real Firebase Auth session so Firestore security
+    /// rules can trust request.auth.token.email instead of taking the app's word for who's
+    /// signed in. isSignedIn only flips to true once this succeeds, since features backed by
+    /// Firestore (Community Service) need a live server-verified identity, not just a local flag.
+    private func bridgeToFirebaseAuth(user: GIDGoogleUser, email: String, name: String) {
+        guard let idToken = user.idToken?.tokenString else {
+            self.signInError = "Sign-in failed (missing token). Please try again."
+            return
+        }
+        let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: user.accessToken.tokenString)
+        Auth.auth().signIn(with: credential) { [weak self] _, error in
+            guard let self else { return }
+            if let error {
+                self.signInError = "Sign-in failed: \(error.localizedDescription)"
+                return
+            }
+            self.signInError = nil
+            self.userName = name
+            self.userEmail = email
+            self.isSignedIn = true
+        }
+    }
+
+    /// Silently re-establishes the Firebase Auth session on app launch from a cached Google
+    /// sign-in, so Firestore rules keep working without prompting the user again every launch.
+    /// Failures here are intentionally quiet and don't touch isSignedIn — the rest of the app's
+    /// "signed in" state is restored separately from AppInfo's own local snapshot, and only
+    /// Firestore-backed features (Community Service) actually need this session to be live.
+    func restoreFirebaseSessionIfNeeded() {
+        guard Auth.auth().currentUser == nil else { return }
+        GIDSignIn.sharedInstance.restorePreviousSignIn { [weak self] user, error in
+            guard let self, let user else { return }
+            let email = user.profile?.email ?? ""
+            guard email.lowercased().hasSuffix(self.allowedDomain.lowercased()) else { return }
+            self.bridgeToFirebaseAuth(user: user, email: email, name: user.profile?.name ?? "")
+        }
     }
 
     func signIn() {
@@ -190,6 +226,7 @@ class GoogleSignInViewModel: ObservableObject {
 
     func signOut() {
         GIDSignIn.sharedInstance.signOut()
+        try? Auth.auth().signOut()
         isSignedIn = false
         userName = ""
         userEmail = ""

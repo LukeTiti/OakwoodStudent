@@ -33,11 +33,17 @@ struct School_NotesApp: App {
             Mac_ContentView()
                 .environmentObject(appInfo)
                 .frame(minWidth: 600, idealWidth: 900, minHeight: 550, idealHeight: 700)
-                .onAppear { appInfo.startCloudSyncPolling() }
+                .onAppear {
+                    appInfo.startCloudSyncPolling()
+                    appInfo.googleVM.restoreFirebaseSessionIfNeeded()
+                }
             #else
             ContentView()
                 .environmentObject(appInfo)
-                .onAppear { appInfo.startCloudSyncPolling() }
+                .onAppear {
+                    appInfo.startCloudSyncPolling()
+                    appInfo.googleVM.restoreFirebaseSessionIfNeeded()
+                }
                 .onOpenURL { url in
                     guard url.scheme == "oakwood" else { return }
                     if url.host() == "assignment",

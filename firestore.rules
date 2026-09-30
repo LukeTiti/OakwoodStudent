@@ -3,7 +3,33 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /serviceForms/{formId} {
-      allow read, create, delete: if true;
+      // Single-document reads by ID stay open — needed for the public /sign/<id> link a
+      // supervisor clicks with no account of their own. Firestore auto-IDs aren't guessable
+      // or enumerable, so this alone was never the bulk-read vector; unrestricted `list` was.
+      allow get: if true;
+
+      // Bulk queries are the actual bulk-dump vector (proven earlier: one unfiltered request
+      // returned every student's name, hours, reflections, supervisor email, and signature
+      // image). Firestore can only prove a `list` is safe when the query itself is filtered on
+      // a value the rule can check, so only two shapes are allowed:
+      //   - a signed-in student querying strictly their own forms (the app's "My Forms")
+      //   - a query filtered to status == 'pending' (the advisor extension/portal queue —
+      //     see chrome-extension/popup.js's fetchPendingForms and advisor/index.html, both
+      //     updated to send a real structured query instead of an unfiltered fetch-and-filter)
+      // Anything else — an unfiltered dump, or querying someone else's studentId — is rejected.
+      allow list: if (request.auth != null && resource.data.studentId == request.auth.token.email)
+        || resource.data.status == 'pending';
+
+      // A new form must be created by its own signed-in student and must start in the correct
+      // initial state — stops someone from writing a document straight into "approved" and
+      // skipping the entire supervisor-signature / advisor-approval flow.
+      allow create: if request.auth != null
+        && request.resource.data.studentId == request.auth.token.email
+        && request.resource.data.status == 'pending_signature';
+
+      // Nothing in the app or extension ever deletes a form — closing this stops anyone from
+      // wiping the whole collection with an unauthenticated request.
+      allow delete: if false;
 
       // The public /sign/<id> page (public/sign/index.html) is unauthenticated by design — an
       // outside supervisor clicks an emailed link with no account of their own. Its own JS only

@@ -243,7 +243,12 @@
 
     let allForms = [], currentFilter = 'pending';
 
-    onSnapshot(query(collection(db, 'serviceForms')), snapshot => {
+    // Database rules only allow listing forms that are still status == 'pending' without
+    // signing in as an advisor (see firestore.rules) — that's the one query shape Firestore
+    // can verify server-side without a real login. An unfiltered listener here would be
+    // rejected outright, so this only ever asks for pending forms; Approved/Rejected/All
+    // show a "sign-in required" placeholder until advisor sign-in is added.
+    onSnapshot(query(collection(db, 'serviceForms'), where('status', '==', 'pending')), snapshot => {
         allForms = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
             .sort((a, b) => b.submittedAt?.toDate() - a.submittedAt?.toDate());
         renderForms();
@@ -270,7 +275,11 @@
 
     function renderForms() {
         const container = document.getElementById('forms-container');
-        const filtered = currentFilter === 'all' ? allForms : allForms.filter(f => f.status === currentFilter);
+        if (currentFilter !== 'pending') {
+            container.innerHTML = '<div class="empty">This view needs advisor sign-in (coming soon) — use the Pending tab for now.</div>';
+            return;
+        }
+        const filtered = allForms.filter(f => f.status === currentFilter);
         if (!filtered.length) { container.innerHTML = '<div class="empty">No forms found</div>'; return; }
 
         container.innerHTML = filtered.map(form => `

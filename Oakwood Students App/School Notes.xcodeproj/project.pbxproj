@@ -17,6 +17,7 @@
 		0651E82D2F2DCF1400098F78 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */; };
 		0651E82F2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */; };
 		0651E8352F2E4BEE00098F78 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 0651E8342F2E4BEE00098F78 /* FirebaseFirestore */; };
+		265FB6D094D4E88898D200FB /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = D3A6A0CB78010CE44B61DFAA /* FirebaseAuth */; };
 		066836422E6BB32300C7F530 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 066836412E6BB32300C7F530 /* SwiftSoup */; };
 		0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */ = {isa = PBXBuildFile; productRef = 0668365C2E6BDE4800C7F530 /* iCalendarParser */; };
 		06A690B02E723BFE0050E087 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 06A690AF2E723BFE0050E087 /* GoogleSignIn */; };
@@ -168,6 +169,7 @@
 				06CCEF762FE282FB00B12D89 /* AppIntents.framework in Frameworks */,
 				0651E82F2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport in Frameworks */,
 				0651E8352F2E4BEE00098F78 /* FirebaseFirestore in Frameworks */,
+				265FB6D094D4E88898D200FB /* FirebaseAuth in Frameworks */,
 				0651E8272F2DCF1400098F78 /* FirebaseAI in Frameworks */,
 				066836422E6BB32300C7F530 /* SwiftSoup in Frameworks */,
 				0668365D2E6BDE4800C7F530 /* iCalendarParser in Frameworks */,
@@ -285,6 +287,7 @@
 				0651E82C2F2DCF1400098F78 /* FirebaseAnalyticsCore */,
 				0651E82E2F2DCF1400098F78 /* FirebaseAnalyticsIdentitySupport */,
 				0651E8342F2E4BEE00098F78 /* FirebaseFirestore */,
+				D3A6A0CB78010CE44B61DFAA /* FirebaseAuth */,
 				064307CB2F731C12004558A6 /* FirebaseMessaging */,
 				06BB80B53022339600AFC011 /* FirebaseStorage */,
 			);
@@ -963,6 +966,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		D3A6A0CB78010CE44B61DFAA /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
 		064307CB2F731C12004558A6 /* FirebaseMessaging */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0651E8252F2DCF1400098F78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

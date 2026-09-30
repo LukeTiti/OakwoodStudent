@@ -186,14 +186,32 @@ function parseFirestoreDoc(fields) {
 }
 
 async function fetchPendingForms() {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/serviceForms`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Firestore fetch failed: HTTP ${response.status}`);
+  // Database rules only allow listing serviceForms when the query itself is filtered to
+  // status == 'pending' (see firestore.rules) — that's the one shape Firestore can verify
+  // server-side without a real advisor login. A plain "list everything, filter in JS" call
+  // (the old approach) is rejected outright, so this uses a real structured query instead.
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "serviceForms" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "status" },
+            op: "EQUAL",
+            value: { stringValue: "pending" }
+          }
+        }
+      }
+    })
+  });
+  if (!response.ok) throw new Error(`Firestore query failed: HTTP ${response.status}`);
   const data = await response.json();
-  const docs = data.documents || [];
-  return docs
-    .map(doc => ({ id: doc.name.split("/").pop(), ...parseFirestoreDoc(doc.fields) }))
-    .filter(f => f.status === "pending");
+  return data
+    .filter(entry => entry.document)
+    .map(entry => ({ id: entry.document.name.split("/").pop(), ...parseFirestoreDoc(entry.document.fields) }));
 }
 
 async function markFormApproved(formId) {
