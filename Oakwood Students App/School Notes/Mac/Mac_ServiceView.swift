@@ -395,7 +395,6 @@ private struct Mac_CreateFormSheet: View {
 
     @State private var title = ""
     @State private var supervisorName = ""
-    @State private var supervisorTitle = ""
     @State private var supervisorEmail = ""
     @State private var advisorName = ""
     @State private var selectedSLOs: Set<String> = []
@@ -412,7 +411,7 @@ private struct Mac_CreateFormSheet: View {
     private var hasOutsideService: Bool { selectedServices.contains { $0.description == "Outside Community Service" } }
     private var totalHours: Double { selectedServices.reduce(0) { $0 + $1.hours } }
     private var canSubmit: Bool {
-        !title.isEmpty && !supervisorName.isEmpty && !supervisorTitle.isEmpty && !supervisorEmail.isEmpty &&
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty &&
         !advisorName.isEmpty &&
         !selectedSLOs.isEmpty &&
         !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -469,7 +468,6 @@ private struct Mac_CreateFormSheet: View {
 
                 Section {
                     TextField("Supervisor Full Name", text: $supervisorName)
-                    TextField("Supervisor Title (e.g. Program Director)", text: $supervisorTitle)
                     TextField("Supervisor Email", text: $supervisorEmail)
                         .autocorrectionDisabled()
                 } header: { Text("Supervisor") } footer: {
@@ -549,9 +547,12 @@ private struct Mac_CreateFormSheet: View {
                                organization: hasOutsideService ? organizationName : nil,
                                organizationKey: organizationKey)
         do {
+            // supervisorTitle is filled in by the supervisor themselves on the sign page,
+            // not the student — it starts blank and gets written by public/sign/index.html's
+            // updateDoc() call once they sign.
             let docId = try await FirebaseService.shared.submitServiceForm(
                 form, studentId: studentId, studentName: studentName, personPK: personPK,
-                supervisorName: supervisorName, supervisorTitle: supervisorTitle, supervisorEmail: supervisorEmail, advisorName: advisorName)
+                supervisorName: supervisorName, supervisorTitle: "", supervisorEmail: supervisorEmail, advisorName: advisorName)
 
             let submittedForm = SubmittedForm(
                 id: docId, title: title, personPK: personPK, status: "pending_signature", submittedAt: Date(),
@@ -559,7 +560,7 @@ private struct Mac_CreateFormSheet: View {
                 reflection3: reflection3, taxID: hasOutsideService ? taxID : "",
                 organization: hasOutsideService ? organizationName : "",
                 organizationKey: organizationKey,
-                services: selectedServices, supervisorName: supervisorName, supervisorTitle: supervisorTitle,
+                services: selectedServices, supervisorName: supervisorName, supervisorTitle: "",
                 supervisorEmail: supervisorEmail, advisorName: advisorName, supervisorSignature: "", signerEmail: "", signatureImageBase64: nil,
                 signedAt: nil, rejectionReason: "")
 
@@ -591,7 +592,6 @@ private struct Mac_EditAndResubmitSheet: View {
 
     @State private var title: String
     @State private var supervisorName: String
-    @State private var supervisorTitle: String
     @State private var supervisorEmail: String
     @State private var advisorName: String
     @State private var selectedSLOs: Set<String>
@@ -610,7 +610,6 @@ private struct Mac_EditAndResubmitSheet: View {
         self.onSuccess = onSuccess
         _title = State(initialValue: form.title)
         _supervisorName = State(initialValue: form.supervisorName)
-        _supervisorTitle = State(initialValue: form.supervisorTitle)
         _supervisorEmail = State(initialValue: form.supervisorEmail)
         _advisorName = State(initialValue: form.advisorName)
         _selectedSLOs = State(initialValue: Set(form.slos))
@@ -625,7 +624,7 @@ private struct Mac_EditAndResubmitSheet: View {
     private var hasOutsideService: Bool { services.contains { $0.description == "Outside Community Service" } }
     private var totalHours: Double { services.reduce(0) { $0 + $1.hours } }
     private var canSubmit: Bool {
-        !title.isEmpty && !supervisorName.isEmpty && !supervisorTitle.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty &&
+        !title.isEmpty && !supervisorName.isEmpty && !supervisorEmail.isEmpty && !services.isEmpty &&
         !advisorName.isEmpty &&
         !selectedSLOs.isEmpty &&
         !reflection1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -694,7 +693,6 @@ private struct Mac_EditAndResubmitSheet: View {
 
                 Section {
                     TextField("Supervisor Full Name", text: $supervisorName)
-                    TextField("Supervisor Title (e.g. Program Director)", text: $supervisorTitle)
                     TextField("Supervisor Email", text: $supervisorEmail)
                         .autocorrectionDisabled()
                 } header: { Text("Supervisor") } footer: {
@@ -779,9 +777,11 @@ private struct Mac_EditAndResubmitSheet: View {
                                organization: hasOutsideService ? organizationName : nil,
                                organizationKey: organizationKey)
         do {
+            // Resubmitting restarts the signing cycle, so supervisorTitle resets too — the
+            // supervisor re-enters it on the sign page along with their new signature.
             try await FirebaseService.shared.resubmitServiceForm(
                 formId: form.id, form: updatedForm,
-                supervisorName: supervisorName, supervisorTitle: supervisorTitle, supervisorEmail: supervisorEmail, advisorName: advisorName)
+                supervisorName: supervisorName, supervisorTitle: "", supervisorEmail: supervisorEmail, advisorName: advisorName)
 
             var resubmittedForm = form
             resubmittedForm.title = title
@@ -795,7 +795,7 @@ private struct Mac_EditAndResubmitSheet: View {
             resubmittedForm.organizationKey = organizationKey
             resubmittedForm.services = services
             resubmittedForm.supervisorName = supervisorName
-            resubmittedForm.supervisorTitle = supervisorTitle
+            resubmittedForm.supervisorTitle = ""
             resubmittedForm.supervisorEmail = supervisorEmail
             resubmittedForm.advisorName = advisorName
             resubmittedForm.status = "pending_signature"

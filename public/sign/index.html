@@ -128,6 +128,7 @@
           <h2>Electronic Signature</h2>
           <p>By printing your name, drawing your signature, and checking the box below, you certify that the service hours listed above are accurate to the best of your knowledge.</p>
           <input type="text" id="sigName" placeholder="Print your full name" oninput="updateBtn()" />
+          <input type="text" id="sigTitle" placeholder="Your title/position (e.g. Program Director)" oninput="updateBtn()" style="margin-top:10px" />
           <input type="email" id="sigEmail" placeholder="Your email address" oninput="updateBtn()" style="margin-top:10px" />
           <div class="sig-label">Draw your signature below</div>
           <canvas id="sigPad"></canvas>
@@ -202,15 +203,17 @@
 
     window.updateBtn = function() {
       const name = document.getElementById("sigName")?.value.trim();
+      const positionTitle = document.getElementById("sigTitle")?.value.trim();
       const email = document.getElementById("sigEmail")?.value.trim();
       const checked = document.getElementById("certify")?.checked;
       const btn = document.getElementById("signBtn");
-      if (btn) btn.disabled = !(name && email && emailPattern.test(email) && checked && hasSignatureInk);
+      if (btn) btn.disabled = !(name && positionTitle && email && emailPattern.test(email) && checked && hasSignatureInk);
     };
 
     window.sign = async function(docId) {
       const btn = document.getElementById("signBtn");
       const name = document.getElementById("sigName").value.trim();
+      const positionTitle = document.getElementById("sigTitle").value.trim();
       const email = document.getElementById("sigEmail").value.trim();
       const canvas = document.getElementById("sigPad");
       btn.disabled = true; btn.textContent = "Signing…";
@@ -218,6 +221,7 @@
         const ref = doc(db, "serviceForms", docId);
         await updateDoc(ref, {
           supervisorSignature: name,
+          supervisorTitle: positionTitle,
           signerEmail: email,
           signatureImage: canvas.toDataURL("image/png"),
           signedAt: serverTimestamp(),

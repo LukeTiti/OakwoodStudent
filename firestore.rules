@@ -46,7 +46,7 @@ service cloud.firestore {
         || (
           request.resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['supervisorSignature', 'signerEmail', 'signatureImage', 'signedAt', 'status'])
+               .hasOnly(['supervisorSignature', 'supervisorTitle', 'signerEmail', 'signatureImage', 'signedAt', 'status'])
         );
     }
 
