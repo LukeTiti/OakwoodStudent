@@ -21,7 +21,7 @@ struct School_NotesApp: App {
 
     init() {
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(
-            clientID: "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
+            clientID: "566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3.apps.googleusercontent.com"
         )
     }
 
@@ -83,7 +83,7 @@ struct School_NotesApp: App {
 //    init() {
 //            // ✅ Set clientID here (no Info.plist needed)
 //            GIDSignIn.sharedInstance.configuration = GIDConfiguration(
-//                clientID: "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
+//                clientID: "566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3.apps.googleusercontent.com"
 //            )
 //        }
 //    var body: some Scene {

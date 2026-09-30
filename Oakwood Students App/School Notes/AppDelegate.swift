@@ -142,7 +142,7 @@ class GoogleSignInViewModel: ObservableObject {
     /// successful, accepted sign-in. UI can observe this to surface an error message.
     @Published var signInError: String? = nil
 
-    private let clientID = "661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com"
+    private let clientID = "566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3.apps.googleusercontent.com"
 
     /// The school's Google Workspace domain. Only accounts on this domain are permitted
     /// to sign in (do not confuse with oakwoodway.org, the public marketing site domain).

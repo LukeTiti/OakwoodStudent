@@ -27,14 +27,14 @@
 			<string>Google Sign in</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn</string>
+				<string>com.googleusercontent.apps.566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3</string>
 			</array>
 		</dict>
 	</array>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<false/>
 	<key>GIDClientID</key>
-	<string>661195592928-e56dd9keruoftlpcbf7s07h3fn22s7vn.apps.googleusercontent.com</string>
+	<string>566131280116-vl10j0masc2tme0m06rqr8f8b0j8lsb3.apps.googleusercontent.com</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
