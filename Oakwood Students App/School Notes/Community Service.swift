@@ -230,7 +230,7 @@ struct ServiceFormDetailView: View {
     @State private var showEditResubmit = false
 
     var signingURL: String { "\(signingBaseURL)/\(form.id)" }
-    var mailData: MailData { makeSigningMailData(to: form.supervisorEmail, supervisorName: form.supervisorName, studentName: "", title: form.title, totalHours: form.totalHours, signingURL: signingURL) }
+    var mailData: MailData { makeSigningMailData(to: form.supervisorEmail, studentName: "", title: form.title, totalHours: form.totalHours, signingURL: signingURL) }
 
     var body: some View {
         List {
@@ -525,7 +525,7 @@ struct CreateFormSheet: View {
                 supervisorEmail: supervisorEmail, advisorName: advisorName, supervisorSignature: "", signerEmail: "", signatureImageBase64: nil,
                 signedAt: nil, rejectionReason: "")
 
-            let mailData = makeSigningMailData(to: supervisorEmail, supervisorName: supervisorName,
+            let mailData = makeSigningMailData(to: supervisorEmail,
                 studentName: studentName, title: title, totalHours: totalHours,
                 signingURL: "\(signingBaseURL)/\(docId)")
 
@@ -772,7 +772,7 @@ struct EditAndResubmitSheet: View {
             resubmittedForm.signatureImageBase64 = nil
             resubmittedForm.signedAt = nil
 
-            let mailData = makeSigningMailData(to: supervisorEmail, supervisorName: supervisorName,
+            let mailData = makeSigningMailData(to: supervisorEmail,
                 studentName: appInfo.googleVM.userName, title: title, totalHours: totalHours,
                 signingURL: "\(signingBaseURL)/\(form.id)")
 

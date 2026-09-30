@@ -274,7 +274,7 @@ private struct Mac_ServiceFormDetailView: View {
     @State private var showEditResubmit = false
 
     private var signingURL: String { "\(macSigningBaseURL)/\(form.id)" }
-    private var mailData: MailData { makeSigningMailData(to: form.supervisorEmail, supervisorName: form.supervisorName, studentName: "", title: form.title, totalHours: form.totalHours, signingURL: signingURL) }
+    private var mailData: MailData { makeSigningMailData(to: form.supervisorEmail, studentName: "", title: form.title, totalHours: form.totalHours, signingURL: signingURL) }
 
     var body: some View {
         List {
@@ -564,7 +564,7 @@ private struct Mac_CreateFormSheet: View {
                 supervisorEmail: supervisorEmail, advisorName: advisorName, supervisorSignature: "", signerEmail: "", signatureImageBase64: nil,
                 signedAt: nil, rejectionReason: "")
 
-            let mailData = makeSigningMailData(to: supervisorEmail, supervisorName: supervisorName,
+            let mailData = makeSigningMailData(to: supervisorEmail,
                 studentName: studentName, title: title, totalHours: totalHours,
                 signingURL: "\(macSigningBaseURL)/\(docId)")
 
@@ -805,7 +805,7 @@ private struct Mac_EditAndResubmitSheet: View {
             resubmittedForm.signatureImageBase64 = nil
             resubmittedForm.signedAt = nil
 
-            let mailData = makeSigningMailData(to: supervisorEmail, supervisorName: supervisorName,
+            let mailData = makeSigningMailData(to: supervisorEmail,
                 studentName: appInfo.googleVM.userName, title: title, totalHours: totalHours,
                 signingURL: "\(macSigningBaseURL)/\(form.id)")
 

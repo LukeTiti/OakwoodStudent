@@ -778,12 +778,12 @@ struct MailData {
     let body: String
 }
 
-func makeSigningMailData(to email: String, supervisorName: String, studentName: String, title: String, totalHours: Double, signingURL: String) -> MailData {
+func makeSigningMailData(to email: String, studentName: String, title: String, totalHours: Double, signingURL: String) -> MailData {
     MailData(
         to: email,
         subject: "Please sign: \(title) — Service Hours Form",
         body: """
-Hi \(supervisorName),
+Hello,
 
 I'm requesting your signature for my community service hours form.
 
