@@ -393,6 +393,26 @@ private struct Mac_CourseAssignmentRow: View {
                 }
             }
             Spacer()
+            // Matches ShowAssignment(showGrade: true) on iOS (Veracross.swift/CourseView) —
+            // this row was missing the actual grade entirely, showing only the due date even
+            // for an assignment that's already been scored.
+            VStack(alignment: .trailing, spacing: 2) {
+                if assignment.completion_status == "Not Turned In" {
+                    Text("NTI")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                } else if let raw = assignment.raw_score, !raw.isEmpty, let percent = assignment.gradePercent {
+                    Text("\(raw) / \(assignment.maximum_score ?? 0)")
+                        .font(.subheadline)
+                    Text(percent, format: .percent.precision(.fractionLength(2)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let status = assignment.completion_status, status.hasPrefix("Turned In") {
+                    Text("Turned In")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Button {
                 withAnimation(.snappy) {
                     appInfo.toggleInfo(for: assignment.score_id)

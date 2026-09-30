@@ -289,7 +289,7 @@
                 ${form.taxID ? `<div class="tax-box">${form.organization ? `${esc(form.organization)} · ` : ''}Tax ID: <strong>${esc(form.taxID)}</strong></div>` : ''}
                 <div class="section-label">Supervisor</div>
                 <div class="entry">
-                    <div>Claimed: <strong>${esc(form.supervisorName) || '—'}</strong> · ${esc(form.supervisorEmail) || '—'}</div>
+                    <div>Claimed: <strong>${esc(form.supervisorName) || '—'}</strong>${form.supervisorTitle ? ` (${esc(form.supervisorTitle)})` : ''} · ${esc(form.supervisorEmail) || '—'}</div>
                     ${form.supervisorSignature ? `
                     <div style="margin-top:4px">Signed: <strong>${esc(form.supervisorSignature)}</strong>${matchBadge(form.supervisorName, form.supervisorSignature, 'name')}</div>
                     <div style="margin-top:2px">${esc(form.signerEmail) || '—'}${matchBadge(form.supervisorEmail, form.signerEmail, 'email')}</div>

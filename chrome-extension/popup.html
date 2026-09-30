@@ -46,20 +46,6 @@
     #status.error { color: var(--red); }
     #status.ok { color: #1a7f37; }
 
-    pre {
-      max-height: 320px;
-      overflow: auto;
-      background: white;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px;
-      font-size: 11px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    pre:empty { display: none; border: none; padding: 0; }
-    hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-
     #advisorSelectContainer input, #advisorSelectContainer select {
       width: 100%;
       padding: 9px 10px;
@@ -181,21 +167,6 @@
     .pending-item-detail .reflection-block { margin: 4px 0 8px; }
     .pending-item-detail .reflection-q { color: var(--muted); font-size: 11px; }
     .pending-item-detail .reflection-a { margin-top: 1px; }
-
-    /* --- Testing tools (hidden by default) --- */
-    #toggleTestingBtn {
-      background: transparent;
-      color: var(--gray);
-      font-size: 11.5px;
-      font-weight: 600;
-      padding: 6px;
-      margin-top: 4px;
-    }
-    #toggleTestingBtn:hover { opacity: 1; color: var(--text); }
-    #testingTools button { margin-top: 8px; }
-    #testingTools .update-btn { background: var(--orange); }
-    #testingTools .create-btn { background: var(--green); }
-    #testingTools .lookup-btn { background: var(--purple); }
   </style>
 </head>
 <body>
@@ -205,17 +176,6 @@
   <div id="pendingList"></div>
 
   <div id="status"></div>
-  <pre id="output"></pre>
-
-  <button id="toggleTestingBtn">Show Testing Tools</button>
-  <div id="testingTools" style="display: none;">
-    <hr>
-    <h1>Pull Volunteer Hours — PK 39950 (test)</h1>
-    <button id="pullBtn">Pull from Veracross</button>
-    <button id="updateBtn" class="update-btn">Test Update (record 11261)</button>
-    <button id="createBtn" class="create-btn">Test Create (new record)</button>
-    <button id="lookupBtn" class="lookup-btn">Lookup Value Lists (categories/terms)</button>
-  </div>
   <script src="popup.js"></script>
 </body>
 </html>

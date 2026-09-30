@@ -49,7 +49,7 @@ class FirebaseService {
     // MARK: - Service Hours Forms
 
     @discardableResult
-    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, personPK: Int?, supervisorName: String, supervisorEmail: String, advisorName: String) async throws -> String {
+    func submitServiceForm(_ form: ServiceForm, studentId: String, studentName: String, personPK: Int?, supervisorName: String, supervisorTitle: String, supervisorEmail: String, advisorName: String) async throws -> String {
         var data: [String: Any] = [
             "studentId": studentId,
             "studentName": studentName,
@@ -64,6 +64,7 @@ class FirebaseService {
             "taxID": form.taxID ?? "",
             "organization": form.organization ?? "",
             "supervisorName": supervisorName,
+            "supervisorTitle": supervisorTitle,
             "supervisorEmail": supervisorEmail,
             "advisorName": advisorName,
             "supervisorSignature": "",
@@ -83,7 +84,7 @@ class FirebaseService {
     /// Resubmits a rejected form in place: same document, edited fields, restarted signing cycle.
     /// Resets status back to "pending_signature" and clears rejection/signature state so the
     /// supervisor re-verifies whatever the student fixed rather than skipping straight to approval.
-    func resubmitServiceForm(formId: String, form: ServiceForm, supervisorName: String, supervisorEmail: String, advisorName: String) async throws {
+    func resubmitServiceForm(formId: String, form: ServiceForm, supervisorName: String, supervisorTitle: String, supervisorEmail: String, advisorName: String) async throws {
         let data: [String: Any] = [
             "title": form.title,
             "totalHours": form.services.reduce(0) { $0 + $1.hours },
@@ -95,6 +96,7 @@ class FirebaseService {
             "organization": form.organization ?? "",
             "organizationKey": (form.organizationKey as Any?) ?? FieldValue.delete(),
             "supervisorName": supervisorName,
+            "supervisorTitle": supervisorTitle,
             "supervisorEmail": supervisorEmail,
             "advisorName": advisorName,
             "status": "pending_signature",
@@ -153,6 +155,7 @@ class FirebaseService {
             organizationKey: data["organizationKey"] as? Int,
             services: services,
             supervisorName: data["supervisorName"] as? String ?? "",
+            supervisorTitle: data["supervisorTitle"] as? String ?? "",
             supervisorEmail: data["supervisorEmail"] as? String ?? "",
             advisorName: data["advisorName"] as? String ?? "",
             supervisorSignature: data["supervisorSignature"] as? String ?? "",
@@ -208,6 +211,7 @@ struct SubmittedForm: Identifiable {
     var organizationKey: Int?  // Veracross organization_key value-list fk — see oakwoodOrganizationKey
     var services: [LocalService]
     var supervisorName: String
+    var supervisorTitle: String = ""
     var supervisorEmail: String
     var advisorName: String = ""
     var supervisorSignature: String
