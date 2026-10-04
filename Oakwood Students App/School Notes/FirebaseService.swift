@@ -40,6 +40,58 @@ let slOptions: [String] = [
 let oakwoodOrganizationName = "Oakwood"
 let oakwoodOrganizationKey = 15296
 
+// MARK: - Service Hours Requirement / Progress
+
+// Oakwood's community service graduation requirement — update here if the school changes it.
+let requiredServiceHoursPerYear = 20.0
+let requiredOutsideServiceHoursPerYear = 10.0
+
+/// Same July-rollover rule the advisor extension uses when posting to Veracross (see
+/// chrome-extension/popup.js's computeSchoolYear) — a school year is named for the calendar
+/// year it starts in. Kept here so the in-app progress bar buckets hours into the same
+/// school year Veracross itself would.
+func schoolYear(for date: Date) -> Int {
+    let calendar = Calendar.current
+    let month = calendar.component(.month, from: date)
+    let year = calendar.component(.year, from: date)
+    return month >= 7 ? year : year - 1
+}
+
+/// Parses a LocalService entry's "MM/dd/yyyy" date string (see EditableServiceEntryRow) into
+/// its school year. Returns nil for anything unparseable rather than guessing, so a malformed
+/// entry is silently excluded from the progress total instead of corrupting it.
+func schoolYear(forDateString dateString: String) -> Int? {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MM/dd/yyyy"
+    guard let date = formatter.date(from: dateString) else { return nil }
+    return schoolYear(for: date)
+}
+
+var currentSchoolYear: Int { schoolYear(for: Date()) }
+
+struct ServiceHoursSummary {
+    var totalHours: Double = 0
+    var outsideHours: Double = 0
+}
+
+/// Summarizes a student's approved service hours for one school year, split by whether each
+/// entry is "Outside Community Service" (counts toward the 10-hour outside minimum) or on-campus
+/// Oakwood service — matches the same description-string convention used everywhere else in the
+/// app (see hasOutsideService in Community Service.swift) rather than inventing a new one.
+func serviceHoursSummary(forms: [SubmittedForm], schoolYear targetYear: Int = currentSchoolYear) -> ServiceHoursSummary {
+    var summary = ServiceHoursSummary()
+    for form in forms where form.status == "approved" {
+        for service in form.services {
+            guard schoolYear(forDateString: service.date) == targetYear else { continue }
+            summary.totalHours += service.hours
+            if service.description == "Outside Community Service" {
+                summary.outsideHours += service.hours
+            }
+        }
+    }
+    return summary
+}
+
 // MARK: - FirebaseService (Handles all Firestore operations)
 class FirebaseService {
     static let shared = FirebaseService()

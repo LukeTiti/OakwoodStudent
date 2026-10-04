@@ -31,6 +31,7 @@ struct ServiceView: View {
     var htmlURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).html") } }
     var selectedTotalHours: Double { appInfo.localServices.filter { selectedIDs.contains($0.id) }.reduce(0) { $0 + $1.hours } }
     var sortedYears: [String] { servicesByYear.keys.sorted().reversed() }
+    var hoursSummary: ServiceHoursSummary { serviceHoursSummary(forms: forms) }
 
     /// Maps a scraped Veracross row's real id back to the rich submitted-form entry that created it
     /// (if it came through our app at all — pre-existing/manually-entered Veracross hours won't match).
@@ -61,6 +62,39 @@ struct ServiceView: View {
 
     var body: some View {
         List {
+                // Progress toward the yearly requirement — only counts approved forms, so it
+                // only moves once an advisor signs off, not when a form is merely submitted.
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Total Hours")
+                            Spacer()
+                            Text("\(hoursSummary.totalHours, specifier: "%.1f") / \(requiredServiceHoursPerYear, specifier: "%.0f")")
+                                .foregroundColor(.secondary)
+                        }
+                        .font(.subheadline)
+                        ProgressView(value: min(hoursSummary.totalHours, requiredServiceHoursPerYear), total: requiredServiceHoursPerYear)
+                    }
+                    .padding(.vertical, 2)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Outside Hours")
+                            Spacer()
+                            Text("\(hoursSummary.outsideHours, specifier: "%.1f") / \(requiredOutsideServiceHoursPerYear, specifier: "%.0f")")
+                                .foregroundColor(.secondary)
+                        }
+                        .font(.subheadline)
+                        ProgressView(value: min(hoursSummary.outsideHours, requiredOutsideServiceHoursPerYear), total: requiredOutsideServiceHoursPerYear)
+                            .tint(.orange)
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("This Year's Progress")
+                } footer: {
+                    Text("At least \(requiredOutsideServiceHoursPerYear, specifier: "%.0f") of your \(requiredServiceHoursPerYear, specifier: "%.0f") hours must be outside hours. Only approved forms count.")
+                }
+
                 // Logged (pending) hours
                 if !appInfo.localServices.isEmpty {
                     Section {
