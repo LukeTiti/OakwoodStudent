@@ -16,6 +16,30 @@ enum GradeStore {
         return decoded
     }
 
+    static func personalScheduleEvents() -> [SchoolEvent] {
+        guard let data = defaults?.data(forKey: "cachedPersonalSchedule"),
+              let decoded = try? JSONDecoder().decode([SchoolEvent].self, from: data) else { return [] }
+        return decoded
+    }
+
+    /// Looks up what time `courseName` actually meets on the same calendar day as `date`,
+    /// matched against the cached personal class schedule (see AppInfo.savePersonalScheduleCache)
+    /// — a loose, bidirectional "contains" match since Veracross's calendar export and its grades
+    /// API don't necessarily spell a course's name identically. Falls back to 8:30 AM when
+    /// there's no class that day (or nothing cached yet), rather than leaving a due time at
+    /// midnight, which is what Siri's "what's due" answer used to show for every assignment.
+    static func classTime(forCourseName courseName: String, on date: Date) -> DateComponents {
+        let defaultTime = DateComponents(hour: 8, minute: 30)
+        guard !courseName.isEmpty else { return defaultTime }
+        let calendar = Calendar.current
+        let sameDayMatch = personalScheduleEvents().first { event in
+            calendar.isDate(event.date, inSameDayAs: date) &&
+            (event.title.localizedCaseInsensitiveContains(courseName) || courseName.localizedCaseInsensitiveContains(event.title))
+        }
+        guard let match = sameDayMatch else { return defaultTime }
+        return calendar.dateComponents([.hour, .minute], from: match.date)
+    }
+
     static func allPairs() -> [(assignment: Assignment, course: Course)] {
         let real = courses().flatMap { course in (course.assignments ?? []).map { ($0, course) } }
         let custom = customAssignments().map { assignment in

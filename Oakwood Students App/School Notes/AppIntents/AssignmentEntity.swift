@@ -41,8 +41,12 @@ struct AssignmentEntity: IndexedEntity {
         self.title = assignment.assignment_description
         self.isCompleted = isCompleted
         self.list = CourseEntity(course: course)
-        self.dueDate = assignment.dueDate.map {
-            Calendar.current.dateComponents([.year, .month, .day], from: $0)
+        self.dueDate = assignment.dueDate.map { due -> DateComponents in
+            var components = Calendar.current.dateComponents([.year, .month, .day], from: due)
+            let classTime = GradeStore.classTime(forCourseName: course.class_name, on: due)
+            components.hour = classTime.hour
+            components.minute = classTime.minute
+            return components
         }
         self.note = assignment.assignment_notes
         self.isFlagged = false
@@ -50,7 +54,6 @@ struct AssignmentEntity: IndexedEntity {
         self.completionDate = nil
         self.urls = [URL(string: "oakwood://assignment/\(assignment.score_id)")!]
         self.tags = Set([assignment.assignment_type].compactMap { $0 })
-        print(self.dueDate)
     }
 }
 

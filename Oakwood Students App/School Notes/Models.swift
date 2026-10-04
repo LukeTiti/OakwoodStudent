@@ -252,7 +252,7 @@ struct SportsEvent: Identifiable, Hashable {
 }
 
 // MARK: - School Event
-struct SchoolEvent: Identifiable, Hashable {
+struct SchoolEvent: Identifiable, Hashable, Codable {
     let id: String
     let title: String
     let date: Date

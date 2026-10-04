@@ -1351,6 +1351,18 @@ class AppInfo: ObservableObject {
         }
 
         saveEventsForWidget(unique)
+        savePersonalScheduleCache(personal)
+    }
+
+    /// Caches the personal class-period schedule separately from saveEventsForWidget's cache
+    /// (which caps at 20 items across every category combined — nowhere near enough to cover a
+    /// class occurring on an arbitrary future assignment due date). Read by GradeStore's
+    /// classTime(forCourseName:on:) so Siri's "what's due" query can report an actual class time
+    /// instead of midnight — see AssignmentEntity.init.
+    private func savePersonalScheduleCache(_ personal: [SchoolEvent]) {
+        if let data = try? JSONEncoder().encode(personal) {
+            UserDefaults(suiteName: appGroupID)?.set(data, forKey: "cachedPersonalSchedule")
+        }
     }
 
     private func saveEventsForWidget(_ items: [CalendarItem]) {
