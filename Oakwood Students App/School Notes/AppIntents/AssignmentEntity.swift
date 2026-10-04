@@ -90,34 +90,20 @@ extension AssignmentEntity {
     struct AssignmentQuery: EntityPropertyQuery {
         typealias ComparatorMappingType = (AssignmentEntity) -> Bool
 
-        // dueDate had no registered comparator at all before this, which is exactly why "what's
-        // due this week"/"due tomorrow" undercounted — Siri's Reminders-schema date-range
-        // queries have no structured way to ask "dueDate is between X and Y" without one, so it
-        // fell back to approximating over whatever suggestedEntities() happened to return
-        // (capped at 20, not actually date-filtered) instead of a real filtered count.
+        // NOTE: dueDate can't get LessThan/GreaterThan-style comparators registered here —
+        // those require the property's type to conform to Comparable, and DateComponents
+        // (required by the .reminders.reminder schema, to allow an all-day due date with no
+        // time) doesn't conform to it. @Property below still exposes it for Siri's own
+        // schema-level reasoning and for SortableBy; the "only 1/3 shown" undercounting is
+        // addressed instead by removing suggestedEntities()'s hardcoded prefix(20) cap, since
+        // that capped, unfiltered list is what Siri actually reasons over for date-range
+        // questions without a real comparator to push the filtering down into our query.
         static var properties = EntityQueryProperties<AssignmentEntity, (AssignmentEntity) -> Bool> {
             Property(\AssignmentEntity.$isCompleted) {
                 EqualToComparator { v in { $0.isCompleted == v } }
             }
             Property(\AssignmentEntity.$isFlagged) {
                 EqualToComparator { v in { $0.isFlagged == v } }
-            }
-            Property(\AssignmentEntity.$dueDate) {
-                LessThanComparator { (value: Date) in
-                    { entity in dueDateAsDate(entity).map { $0 < value } ?? false }
-                }
-                LessThanOrEqualToComparator { (value: Date) in
-                    { entity in dueDateAsDate(entity).map { $0 <= value } ?? false }
-                }
-                GreaterThanComparator { (value: Date) in
-                    { entity in dueDateAsDate(entity).map { $0 > value } ?? false }
-                }
-                GreaterThanOrEqualToComparator { (value: Date) in
-                    { entity in dueDateAsDate(entity).map { $0 >= value } ?? false }
-                }
-                EqualToComparator { (value: Date) in
-                    { entity in dueDateAsDate(entity).map { Calendar.current.isDate($0, inSameDayAs: value) } ?? false }
-                }
             }
         }
 
@@ -139,13 +125,17 @@ extension AssignmentEntity {
         func suggestedEntities() async throws -> [AssignmentEntity] {
             let info = GradeStore.completionInfo()
             let now = Date()
+            // No cap here (used to be prefix(20)) — this is the full candidate list Siri
+            // reasons over for date-range questions like "due this week", since dueDate can't
+            // have a real comparator registered (see the comment on `properties` above). A
+            // student realistically won't have hundreds of incomplete upcoming assignments, so
+            // returning everything is safe and avoids silently truncating the real answer.
             return GradeStore.allPairs()
                 .filter {
                     !completionState(for: $0.assignment, info: info) &&
                     ($0.assignment.dueDate ?? .distantPast) >= now
                 }
                 .sorted { ($0.assignment.dueDate ?? .distantFuture) < ($1.assignment.dueDate ?? .distantFuture) }
-                .prefix(20)
                 .map { AssignmentEntity(assignment: $0.assignment, course: $0.course, isCompleted: false) }
         }
 
@@ -160,11 +150,6 @@ extension AssignmentEntity {
             return results
         }
     }
-}
-
-@available(iOS 27.0, macOS 27.0, *)
-private func dueDateAsDate(_ entity: AssignmentEntity) -> Date? {
-    entity.dueDate.flatMap { Calendar.current.date(from: $0) }
 }
 
 private func completionState(for assignment: Assignment, info: [Int: Bool]) -> Bool {
