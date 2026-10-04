@@ -29,13 +29,17 @@ struct GameJobSignups: Identifiable {
     var jobs: [GameJobSlot]
 }
 
-enum SportsSignupError: Error, CustomLocalizedStringResourceConvertible {
+enum SportsSignupError: Error, LocalizedError {
     case server(String)
     case malformedResponse
 
-    var localizedStringResource: LocalizedStringResource {
+    // LocalizedError, not CustomLocalizedStringResourceConvertible — the latter is only ever
+    // consulted by AppIntents/Siri dialog resolution. Plain error.localizedDescription (what the
+    // UI here actually calls) needs LocalizedError's errorDescription, or Swift falls back to a
+    // generic "The operation couldn't be completed (SportsSignupError error 0)" message.
+    var errorDescription: String? {
         switch self {
-        case .server(let message): return "\(message)"
+        case .server(let message): return message
         case .malformedResponse: return "Couldn't read the signup sheet's response."
         }
     }
