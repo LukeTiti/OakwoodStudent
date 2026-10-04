@@ -60,7 +60,11 @@ enum SportsSignupService {
             guard let date = isoFormatter.date(from: raw.gameTime) else { return nil }
             return GameJobSignups(
                 gameTime: date, team: raw.team, opponent: raw.opponent,
-                jobs: raw.jobs.map { GameJobSlot(name: $0.name, filledBy: $0.filledBy) }
+                // "N/A" means the AD marked this job as not needed for this game — hide it
+                // entirely rather than showing it as filled by someone named "N/A".
+                jobs: raw.jobs
+                    .filter { $0.filledBy.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare("N/A") != .orderedSame }
+                    .map { GameJobSlot(name: $0.name, filledBy: $0.filledBy) }
             )
         }
     }
