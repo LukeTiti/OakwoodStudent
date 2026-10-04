@@ -1073,6 +1073,17 @@ struct ClubEvent: Identifiable {
     var description: String
 }
 
+/// One student's RSVP/attendance record for a single ClubEvent, stored as
+/// clubs/{clubId}/events/{eventId}/attendance/{email} — the email itself is the document id
+/// (a valid Firestore id; only "/" and an id of just "." or ".." are actually disallowed),
+/// so toggling either flag is always a single known-path write, never a query.
+struct ClubEventAttendee: Identifiable, Equatable {
+    var id: String  // email
+    var name: String
+    var rsvped: Bool = false
+    var attended: Bool = false
+}
+
 struct ClubAnnouncement: Identifiable {
     var id: String
     var title: String
@@ -1089,6 +1100,9 @@ extension FirebaseService {
     private func clubRef(_ id: String) -> DocumentReference { db.collection("clubs").document(id) }
     private func eventsRef(_ clubId: String) -> CollectionReference { clubRef(clubId).collection("events") }
     private func announcementsRef(_ clubId: String) -> CollectionReference { clubRef(clubId).collection("announcements") }
+    private func attendanceRef(_ clubId: String, _ eventId: String) -> CollectionReference {
+        eventsRef(clubId).document(eventId).collection("attendance")
+    }
 
     func fetchClubs() async throws -> [Club] {
         try await db.collection("clubs").getDocuments().documents.compactMap(parseClub).sorted { $0.name < $1.name }
@@ -1151,8 +1165,35 @@ extension FirebaseService {
     }
 
     func deleteClubEvent(clubId: String, eventId: String) async throws {
+        for doc in try await attendanceRef(clubId, eventId).getDocuments().documents { try await doc.reference.delete() }
         try await eventsRef(clubId).document(eventId).delete()
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["event-\(eventId)-1hr", "event-\(eventId)-start"])
+    }
+
+    func fetchClubEventAttendees(clubId: String, eventId: String) async throws -> [ClubEventAttendee] {
+        try await attendanceRef(clubId, eventId).getDocuments().documents.compactMap { doc -> ClubEventAttendee? in
+            let d = doc.data()
+            guard let name = d["name"] as? String else { return nil }
+            return ClubEventAttendee(id: doc.documentID, name: name,
+                rsvped: d["rsvped"] as? Bool ?? false, attended: d["attended"] as? Bool ?? false)
+        }
+    }
+
+    /// Un-RSVPing only clears the rsvped flag rather than deleting the record — if an editor had
+    /// already marked this person attended for some reason, backing out an RSVP shouldn't erase it.
+    func setClubEventRSVP(clubId: String, eventId: String, email: String, name: String, going: Bool) async throws {
+        let ref = attendanceRef(clubId, eventId).document(email)
+        if going {
+            try await ref.setData(["name": name, "rsvped": true, "respondedAt": Timestamp(date: Date())], merge: true)
+        } else {
+            try await ref.setData(["rsvped": false], merge: true)
+        }
+    }
+
+    /// Marks someone as having actually shown up — works for RSVP'd students (toggling their
+    /// existing record) and walk-ins who never RSVP'd (creating a fresh attended-only record).
+    func setClubEventAttendance(clubId: String, eventId: String, email: String, name: String, attended: Bool) async throws {
+        try await attendanceRef(clubId, eventId).document(email).setData(["name": name, "attended": attended], merge: true)
     }
 
     func fetchClubAnnouncements(clubId: String) async throws -> [ClubAnnouncement] {

@@ -103,6 +103,7 @@ struct Mac_ClubDetailView: View {
 
     @State private var events: [ClubEvent] = []
     @State private var announcements: [ClubAnnouncement] = []
+    @State private var attendeesByEvent: [String: [ClubEventAttendee]] = [:]
     @State private var isLoadingEvents = true
     @State private var isLoadingAnnouncements = true
     @State private var showEdit = false
@@ -110,6 +111,7 @@ struct Mac_ClubDetailView: View {
     @State private var showAddEvent = false
     @State private var showAddAnnouncement = false
     @State private var editingEvent: ClubEvent? = nil
+    @State private var managingAttendanceFor: ClubEvent? = nil
     @State private var cookiesReady = false
 
     private var userEmail: String { appInfo.googleVM.userEmail }
@@ -204,7 +206,10 @@ struct Mac_ClubDetailView: View {
                     else {
                         ForEach(Array(upcomingEvents.enumerated()), id: \.element.id) { index, event in
                             if index > 0 { cardDivider }
-                            Mac_ClubEventRow(event: event)
+                            Mac_ClubEventRow(event: event, attendees: attendeesByEvent[event.id] ?? [], isPast: false, canEdit: canEdit,
+                                isGoing: attendeesByEvent[event.id]?.first(where: { $0.id == userEmail })?.rsvped ?? false,
+                                onToggleRSVP: { toggleRSVP(for: event) },
+                                onManageAttendance: { managingAttendanceFor = event })
                                 .contextMenu { if canEdit { eventContextMenuItems(event) } }
                         }
                     }
@@ -219,7 +224,8 @@ struct Mac_ClubDetailView: View {
                     cardSection {
                         ForEach(Array(pastEvents.enumerated()), id: \.element.id) { index, event in
                             if index > 0 { cardDivider }
-                            Mac_ClubEventRow(event: event)
+                            Mac_ClubEventRow(event: event, attendees: attendeesByEvent[event.id] ?? [], isPast: true, canEdit: canEdit,
+                                isGoing: false, onToggleRSVP: {}, onManageAttendance: { managingAttendanceFor = event })
                                 .contextMenu { if canEdit { deleteEventButton(event) } }
                         }
                     }
@@ -268,6 +274,12 @@ struct Mac_ClubDetailView: View {
         .sheet(isPresented: $showAddAnnouncement) {
             Mac_ClubAnnouncementFormView(clubId: club.id, clubName: club.name, authorName: appInfo.googleVM.userName) { await loadAnnouncements() }
                 .frame(minWidth: 420, minHeight: 300)
+        }
+        .sheet(item: $managingAttendanceFor) { event in
+            Mac_ClubEventAttendanceView(clubId: club.id, event: event, attendees: attendeesByEvent[event.id] ?? []) { updated in
+                attendeesByEvent[event.id] = updated
+            }
+            .frame(minWidth: 420, minHeight: 420)
         }
         .onAppear {
             appInfo.markClubViewed(club.id)
@@ -325,6 +337,19 @@ struct Mac_ClubDetailView: View {
         events = (try? await FirebaseService.shared.fetchClubEvents(clubId: club.id)) ?? []
         isLoadingEvents = false
         if appInfo.followedClubIDs.contains(club.id) { scheduleEventReminders(clubName: club.name, events: events) }
+        for event in events {
+            attendeesByEvent[event.id] = (try? await FirebaseService.shared.fetchClubEventAttendees(clubId: club.id, eventId: event.id)) ?? []
+        }
+    }
+
+    private func toggleRSVP(for event: ClubEvent) {
+        let email = userEmail, name = appInfo.googleVM.userName
+        guard !email.isEmpty else { return }
+        let currentlyGoing = attendeesByEvent[event.id]?.first(where: { $0.id == email })?.rsvped ?? false
+        Task {
+            try? await FirebaseService.shared.setClubEventRSVP(clubId: club.id, eventId: event.id, email: email, name: name, going: !currentlyGoing)
+            attendeesByEvent[event.id] = (try? await FirebaseService.shared.fetchClubEventAttendees(clubId: club.id, eventId: event.id)) ?? []
+        }
     }
     private func loadAnnouncements() async {
         isLoadingAnnouncements = true
@@ -337,13 +362,109 @@ struct Mac_ClubDetailView: View {
 
 private struct Mac_ClubEventRow: View {
     let event: ClubEvent
+    let attendees: [ClubEventAttendee]
+    let isPast: Bool
+    let canEdit: Bool
+    let isGoing: Bool
+    var onToggleRSVP: () -> Void
+    var onManageAttendance: () -> Void
+
+    private var goingCount: Int { attendees.filter { $0.rsvped }.count }
+    private var attendedCount: Int { attendees.filter { $0.attended }.count }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(event.title).font(.body.weight(.semibold)).foregroundStyle(.white)
             Label(event.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar").font(.caption).foregroundStyle(.white.opacity(0.65))
             if !event.location.isEmpty { Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundStyle(.white.opacity(0.65)) }
             if !event.description.isEmpty { Text(event.description).font(.caption).foregroundStyle(.white.opacity(0.65)).lineLimit(2) }
+
+            HStack(spacing: 8) {
+                if !isPast {
+                    Button(action: onToggleRSVP) {
+                        Label(isGoing ? "Going" : "RSVP", systemImage: isGoing ? "checkmark.circle.fill" : "circle")
+                    }
+                    .tint(isGoing ? .green : .accentColor)
+                    .controlSize(.small)
+                    if goingCount > 0 { Text("\(goingCount) going").font(.caption2).foregroundStyle(.white.opacity(0.65)) }
+                }
+                if canEdit {
+                    Button(action: onManageAttendance) {
+                        Label(attendedCount > 0 ? "\(attendedCount) attended" : "Attendance", systemImage: "checkmark.seal")
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(.top, 2)
         }.padding(.vertical, 4)
+    }
+}
+
+// MARK: - Club Event Attendance
+
+private struct Mac_ClubEventAttendanceView: View {
+    let clubId: String
+    let event: ClubEvent
+    @State var attendees: [ClubEventAttendee]
+    var onUpdate: ([ClubEventAttendee]) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var showAddAttendee = false
+
+    private var sorted: [ClubEventAttendee] { attendees.sorted { $0.name < $1.name } }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if attendees.isEmpty {
+                    Text("No RSVPs or attendees yet").foregroundStyle(.secondary)
+                }
+                ForEach(sorted) { attendee in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attendee.name)
+                            if attendee.rsvped { Text("RSVP'd").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        Button { toggleAttended(attendee) } label: {
+                            Image(systemName: attendee.attended ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(attendee.attended ? .green : .secondary)
+                                .font(.title3)
+                        }.buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .navigationTitle("Attendance: \(event.title)")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button { showAddAttendee = true } label: { Image(systemName: "plus") } }
+            }
+            .sheet(isPresented: $showAddAttendee) {
+                Mac_ClubDirectoryPickerView(title: "Add Attendee", emailOnly: true) { person in
+                    guard let email = person.studentEmail else { return }
+                    addWalkIn(email: email, name: person.displayName)
+                }
+                .frame(minWidth: 420, minHeight: 360)
+            }
+        }
+    }
+
+    private func toggleAttended(_ attendee: ClubEventAttendee) {
+        guard let idx = attendees.firstIndex(where: { $0.id == attendee.id }) else { return }
+        attendees[idx].attended.toggle()
+        let updatedAttended = attendees[idx].attended
+        onUpdate(attendees)
+        Task { try? await FirebaseService.shared.setClubEventAttendance(clubId: clubId, eventId: event.id, email: attendee.id, name: attendee.name, attended: updatedAttended) }
+    }
+
+    private func addWalkIn(email: String, name: String) {
+        if let idx = attendees.firstIndex(where: { $0.id == email }) {
+            attendees[idx].attended = true
+        } else {
+            attendees.append(ClubEventAttendee(id: email, name: name, rsvped: false, attended: true))
+        }
+        onUpdate(attendees)
+        Task { try? await FirebaseService.shared.setClubEventAttendance(clubId: clubId, eventId: event.id, email: email, name: name, attended: true) }
     }
 }
 
