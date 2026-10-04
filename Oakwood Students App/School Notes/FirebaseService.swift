@@ -69,27 +69,37 @@ func schoolYear(forDateString dateString: String) -> Int? {
 
 var currentSchoolYear: Int { schoolYear(for: Date()) }
 
-struct ServiceHoursSummary {
+/// "2025" -> "2025–26", matching how Oakwood/Veracross refer to a school year.
+func schoolYearLabel(for year: Int) -> String {
+    "\(year)–\(String(format: "%02d", (year + 1) % 100))"
+}
+
+struct ServiceHoursYearSummary: Identifiable {
+    var id: Int { year }
+    var year: Int
     var totalHours: Double = 0
     var outsideHours: Double = 0
 }
 
-/// Summarizes a student's approved service hours for one school year, split by whether each
-/// entry is "Outside Community Service" (counts toward the 10-hour outside minimum) or on-campus
+/// Summarizes a student's approved service hours per school year, split by whether each entry
+/// is "Outside Community Service" (counts toward the 10-hour outside minimum) or on-campus
 /// Oakwood service — matches the same description-string convention used everywhere else in the
 /// app (see hasOutsideService in Community Service.swift) rather than inventing a new one.
-func serviceHoursSummary(forms: [SubmittedForm], schoolYear targetYear: Int = currentSchoolYear) -> ServiceHoursSummary {
-    var summary = ServiceHoursSummary()
+/// Always includes the current school year (even at zero) so the progress section has something
+/// to show before a student's first approval of the year; other years only appear once they
+/// have approved hours.
+func serviceHoursSummaries(forms: [SubmittedForm]) -> [ServiceHoursYearSummary] {
+    var byYear: [Int: ServiceHoursYearSummary] = [currentSchoolYear: ServiceHoursYearSummary(year: currentSchoolYear)]
     for form in forms where form.status == "approved" {
         for service in form.services {
-            guard schoolYear(forDateString: service.date) == targetYear else { continue }
-            summary.totalHours += service.hours
+            guard let year = schoolYear(forDateString: service.date) else { continue }
+            byYear[year, default: ServiceHoursYearSummary(year: year)].totalHours += service.hours
             if service.description == "Outside Community Service" {
-                summary.outsideHours += service.hours
+                byYear[year, default: ServiceHoursYearSummary(year: year)].outsideHours += service.hours
             }
         }
     }
-    return summary
+    return byYear.values.sorted { $0.year > $1.year }
 }
 
 // MARK: - FirebaseService (Handles all Firestore operations)
