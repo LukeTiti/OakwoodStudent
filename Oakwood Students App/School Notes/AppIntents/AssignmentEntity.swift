@@ -20,7 +20,7 @@ struct AssignmentEntity: IndexedEntity {
     @Property(title: "Title") var title: String
     @Property(title: "Completed") var isCompleted: Bool
     var list: CourseEntity
-    var dueDate: DateComponents?
+    @Property(title: "Due Date") var dueDate: DateComponents?
     var note: String?
     @Property(title: "Flagged") var isFlagged: Bool?
     var creationDate: Date?
@@ -90,6 +90,11 @@ extension AssignmentEntity {
     struct AssignmentQuery: EntityPropertyQuery {
         typealias ComparatorMappingType = (AssignmentEntity) -> Bool
 
+        // dueDate had no registered comparator at all before this, which is exactly why "what's
+        // due this week"/"due tomorrow" undercounted — Siri's Reminders-schema date-range
+        // queries have no structured way to ask "dueDate is between X and Y" without one, so it
+        // fell back to approximating over whatever suggestedEntities() happened to return
+        // (capped at 20, not actually date-filtered) instead of a real filtered count.
         static var properties = EntityQueryProperties<AssignmentEntity, (AssignmentEntity) -> Bool> {
             Property(\AssignmentEntity.$isCompleted) {
                 EqualToComparator { v in { $0.isCompleted == v } }
@@ -97,10 +102,28 @@ extension AssignmentEntity {
             Property(\AssignmentEntity.$isFlagged) {
                 EqualToComparator { v in { $0.isFlagged == v } }
             }
+            Property(\AssignmentEntity.$dueDate) {
+                LessThanComparator { (value: Date) in
+                    { entity in dueDateAsDate(entity).map { $0 < value } ?? false }
+                }
+                LessThanOrEqualToComparator { (value: Date) in
+                    { entity in dueDateAsDate(entity).map { $0 <= value } ?? false }
+                }
+                GreaterThanComparator { (value: Date) in
+                    { entity in dueDateAsDate(entity).map { $0 > value } ?? false }
+                }
+                GreaterThanOrEqualToComparator { (value: Date) in
+                    { entity in dueDateAsDate(entity).map { $0 >= value } ?? false }
+                }
+                EqualToComparator { (value: Date) in
+                    { entity in dueDateAsDate(entity).map { Calendar.current.isDate($0, inSameDayAs: value) } ?? false }
+                }
+            }
         }
 
         static var sortingOptions = SortingOptions {
             SortableBy(\AssignmentEntity.$title)
+            SortableBy(\AssignmentEntity.$dueDate)
         }
 
         func entities(for identifiers: [Int]) async throws -> [AssignmentEntity] {
@@ -137,6 +160,11 @@ extension AssignmentEntity {
             return results
         }
     }
+}
+
+@available(iOS 27.0, macOS 27.0, *)
+private func dueDateAsDate(_ entity: AssignmentEntity) -> Date? {
+    entity.dueDate.flatMap { Calendar.current.date(from: $0) }
 }
 
 private func completionState(for assignment: Assignment, info: [Int: Bool]) -> Bool {
