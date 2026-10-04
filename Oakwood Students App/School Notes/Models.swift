@@ -414,6 +414,12 @@ struct SegmentedHoursLegend: View {
     let outsideHours: Double
     let totalHours: Double
 
+    // Deliberately uncapped — going over 100% (e.g. 210%) is fine and worth showing as-is
+    // rather than clamping, unlike the bar itself which has to stop at its own container.
+    private var totalPercent: Double {
+        requiredServiceHoursPerYear > 0 ? (totalHours / requiredServiceHoursPerYear) * 100 : 0
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             HStack(spacing: 4) {
@@ -422,7 +428,7 @@ struct SegmentedHoursLegend: View {
             }
             HStack(spacing: 4) {
                 Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                Text("Total \(totalHours, specifier: "%.1f")/\(requiredServiceHoursPerYear, specifier: "%.0f")")
+                Text("Total \(totalHours, specifier: "%.1f")/\(requiredServiceHoursPerYear, specifier: "%.0f") (\(totalPercent, specifier: "%.0f")%)")
             }
             Spacer()
         }
