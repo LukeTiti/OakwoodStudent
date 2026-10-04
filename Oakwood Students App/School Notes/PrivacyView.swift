@@ -17,10 +17,10 @@ struct PrivacyView: View {
 
                 Text("This app is built for Oakwood students and only works with your Oakwood school account. Here's what it does with your information.")
 
-                group("What this app collects") {
+                group("What this app uses") {
                     bullet("Your name and email, from signing in with your Oakwood Google account (@oakwoodstudent.org). Personal Google accounts can't sign in.")
-                    bullet("Your grades and assignments, pulled from Veracross only while you're logged into it — this data stays on your device and in your own iCloud account.")
-                    bullet("Community service hours you submit: the hours, your reflections, and your supervisor's name, title, email, and signature.")
+                    bullet("Your grades and assignments, pulled from Veracross only while you're logged into it — this stays in your own private iCloud account. I can't see it.")
+                    bullet("Community service hours you submit: the hours, your reflections, and your supervisor's name, title, email, and signature. This is only used for the purpose it's submitted for.")
                 }
 
                 group("How your community service data is protected") {
