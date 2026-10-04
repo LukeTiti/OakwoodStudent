@@ -81,7 +81,7 @@ class AppInfo: ObservableObject {
     // MARK: - Calendar State
     @Published var calendarItems: [CalendarItem] = []
     @Published var calendarScores: [String: GameScore] = [:]
-    @Published var calendarMySignups: [String: [ScoreboardSignup]] = [:]
+    @Published var sportsSignups: [GameJobSignups] = []
     @Published var calendarIsLoading = false
     // Tombstone set for deleted custom assignments, mirroring `deletedServiceIDs`/`localServices`
     // below — Assignment's `id` is `assignment_description` (a pre-existing quirk, not fixed
@@ -1412,11 +1412,8 @@ class AppInfo: ObservableObject {
     }
 
     func loadCalendarMySignups() async {
-        let email = googleVM.userEmail
-        guard !email.isEmpty else { return }
-        let signups = (try? await FirebaseService.shared.fetchMySignups(userEmail: email)) ?? []
-        let grouped = Dictionary(grouping: signups) { $0.eventId }
-        await MainActor.run { calendarMySignups = grouped }
+        let signups = (try? await SportsSignupService.fetchSignups()) ?? []
+        await MainActor.run { sportsSignups = signups }
     }
 
     func loadCalendarSportsEvents() async -> [SportsEvent] {

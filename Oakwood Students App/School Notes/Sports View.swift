@@ -11,7 +11,7 @@ import SwiftUI
 struct SportsEventRow: View {
     let event: SportsEvent
     let score: GameScore?
-    var mySignups: [ScoreboardSignup] = []
+    var myJob: String? = nil
 
     var oakwoodScore: Int { score.map { event.isAway ? $0.awayScore : $0.homeScore } ?? 0 }
     var opponentScore: Int { score.map { event.isAway ? $0.homeScore : $0.awayScore } ?? 0 }
@@ -39,13 +39,13 @@ struct SportsEventRow: View {
             if !event.location.isEmpty {
                 HStack(spacing: 4) {
                     Label(event.location, systemImage: "mappin.circle").font(.caption).foregroundColor(.secondary)
-                    if let job = mySignups.first?.job {
+                    if let job = myJob {
                         Text("· Working: \(job)")
                             .font(.caption2)
                             .foregroundColor(.indigo)
                     }
                 }
-            } else if let job = mySignups.first?.job {
+            } else if let job = myJob {
                 Text("Working: \(job)")
                     .font(.caption2)
                     .foregroundColor(.indigo)
@@ -134,7 +134,7 @@ struct GameDetailView: View {
     @EnvironmentObject var appInfo: AppInfo
 
     @State private var gameScore: GameScore?
-    @State private var signups: [ScoreboardSignup] = []
+    @State private var allSignups: [GameJobSignups] = []
     @State private var isLoading = true
     @State private var showScoreSheet = false
     @State private var homeScoreInput = ""
@@ -144,7 +144,7 @@ struct GameDetailView: View {
     var isSignedIn: Bool { !appInfo.googleVM.userEmail.isEmpty }
     var userEmail: String { appInfo.googleVM.userEmail }
     var userName: String { appInfo.googleVM.userName }
-    var jobs: [JobDefinition] { jobsForSport(event.sportName) }
+    var matchedSignup: GameJobSignups? { matchingSignups(for: event, in: allSignups) }
     var isPastGame: Bool { event.date < Calendar.current.startOfDay(for: Date()) }
 
     var body: some View {
@@ -190,17 +190,18 @@ struct GameDetailView: View {
                 }
             }
 
-            if !event.isAway && !jobs.isEmpty {
+            if !event.isAway, let matchedSignup, !matchedSignup.jobs.isEmpty {
                 Section("Scoreboard Jobs") {
-                    ForEach(jobs, id: \.name) { job in
-                        ForEach(0..<job.slots, id: \.self) { slot in
-                            jobSlotRow(job: job, slot: slot)
-                        }
+                    ForEach(matchedSignup.jobs) { job in
+                        jobSlotRow(job: job)
                     }
                     if isPastGame {
                         Text("Signups closed for past games").font(.caption).foregroundColor(.secondary)
                     } else if !isSignedIn {
                         Text("Sign in to sign up for jobs").font(.caption).foregroundColor(.secondary)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundColor(.red)
                     }
                 }
             }
@@ -237,26 +238,26 @@ struct GameDetailView: View {
     }
 
     @ViewBuilder
-    func jobSlotRow(job: JobDefinition, slot: Int) -> some View {
-        let displayName = job.slots > 1 ? "\(job.name) \(slot + 1)" : job.name
-        let signup = signups.first { $0.job == job.name && $0.slot == slot }
-
+    func jobSlotRow(job: GameJobSlot) -> some View {
         HStack {
-            Text(displayName)
+            Text(job.name)
             Spacer()
-            if let signup = signup {
-                if signup.userEmail == userEmail {
+            if !job.isOpen {
+                // Matched by name, not email — the sheet only ever stores a first name (same
+                // convention the AD already uses manually), so this can't distinguish two
+                // students sharing one, same as the sheet itself can't.
+                if job.filledBy == userName {
                     Text("You").foregroundColor(.green)
                     if !isPastGame {
-                        Button("Cancel") { cancelSignup(signup) }.foregroundColor(.red).buttonStyle(.borderless)
+                        Button("Cancel") { cancelSignup(job: job.name) }.foregroundColor(.red).buttonStyle(.borderless)
                     }
                 } else {
-                    Text(signup.userName).foregroundColor(.secondary)
+                    Text(job.filledBy).foregroundColor(.secondary)
                 }
             } else if isPastGame {
                 Text("Unfilled").foregroundColor(.secondary)
             } else if isSignedIn {
-                Button("Sign Up") { signUp(job: job.name, slot: slot) }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Sign Up") { signUp(job: job.name) }.buttonStyle(.borderedProminent).controlSize(.small)
             } else {
                 Text("Available").foregroundColor(.secondary)
             }
@@ -303,7 +304,7 @@ struct GameDetailView: View {
     }
 
     func loadSignups() async {
-        signups = (try? await FirebaseService.shared.fetchSignups(eventId: event.id)) ?? []
+        allSignups = (try? await SportsSignupService.fetchSignups()) ?? []
     }
 
     func submitScore() async {
@@ -313,11 +314,12 @@ struct GameDetailView: View {
         await MainActor.run { showScoreSheet = false }
     }
 
-    func signUp(job: String, slot: Int) {
-        let desc = "\(event.sportName) - \(event.teamName) vs \(event.opponent)"
+    func signUp(job: String) {
+        guard let matchedSignup else { return }
         Task {
             do {
-                try await FirebaseService.shared.signUpForJob(eventId: event.id, job: job, slot: slot, userEmail: userEmail, userName: userName, eventDate: event.date, eventDescription: desc)
+                try await SportsSignupService.setJob(game: matchedSignup, job: job, name: userName, action: "signup")
+                await MainActor.run { errorMessage = nil }
                 await loadSignups()
             } catch {
                 await MainActor.run { errorMessage = error.localizedDescription }
@@ -325,10 +327,16 @@ struct GameDetailView: View {
         }
     }
 
-    func cancelSignup(_ signup: ScoreboardSignup) {
+    func cancelSignup(job: String) {
+        guard let matchedSignup else { return }
         Task {
-            try? await FirebaseService.shared.cancelSignup(signupId: signup.id)
-            await loadSignups()
+            do {
+                try await SportsSignupService.setJob(game: matchedSignup, job: job, name: userName, action: "cancel")
+                await MainActor.run { errorMessage = nil }
+                await loadSignups()
+            } catch {
+                await MainActor.run { errorMessage = error.localizedDescription }
+            }
         }
     }
 }
@@ -355,7 +363,7 @@ struct DayDetailView: View {
                         SportsEventRow(
                             event: event,
                             score: appInfo.calendarScores[event.id],
-                            mySignups: appInfo.calendarMySignups[event.id] ?? []
+                            myJob: myJobName(for: event, in: appInfo.sportsSignups, userName: appInfo.googleVM.userName)
                         )
                     }
                 case .personal(let event):
@@ -518,7 +526,7 @@ struct CalendarView: View {
         switch item {
         case .sports(let event):
             NavigationLink(destination: GameDetailView(event: event)) {
-                SportsEventRow(event: event, score: appInfo.calendarScores[event.id], mySignups: appInfo.calendarMySignups[event.id] ?? [])
+                SportsEventRow(event: event, score: appInfo.calendarScores[event.id], myJob: myJobName(for: event, in: appInfo.sportsSignups, userName: appInfo.googleVM.userName))
             }
         case .school(let event):
             NavigationLink(destination: SchoolEventDetailView(event: event)) {

@@ -25,20 +25,20 @@ function doGet(e) {
   const headers = values[0];
   const jobColumns = headers.slice(FIXED_COLUMNS.length);
 
+  // jobs is an array, not an object keyed by job name — JSON objects don't guarantee key
+  // order on the Swift decoding side, and the app needs to show jobs in the same left-to-right
+  // column order ADs see in the sheet.
   const games = values.slice(1)
     .filter(row => row[0] instanceof Date)
-    .map(row => {
-      const game = {
-        gameTime: combinedISOString(row[0], row[1]),
-        team: String(row[2] || ''),
-        opponent: String(row[3] || ''),
-        jobs: {}
-      };
-      jobColumns.forEach((job, i) => {
-        game.jobs[String(job)] = String(row[FIXED_COLUMNS.length + i] || '');
-      });
-      return game;
-    });
+    .map(row => ({
+      gameTime: combinedISOString(row[0], row[1]),
+      team: String(row[2] || ''),
+      opponent: String(row[3] || ''),
+      jobs: jobColumns.map((job, i) => ({
+        name: String(job),
+        filledBy: String(row[FIXED_COLUMNS.length + i] || '')
+      }))
+    }));
 
   return jsonResponse({ games: games });
 }
