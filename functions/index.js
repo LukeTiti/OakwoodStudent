@@ -9,7 +9,11 @@
 
 const {setGlobalOptions} = require("firebase-functions");
 const {onRequest} = require("firebase-functions/https");
+const {onDocumentUpdated} = require("firebase-functions/v2/firestore");
 const logger = require("firebase-functions/logger");
+const admin = require("firebase-admin");
+
+admin.initializeApp();
 
 // For cost control, you can set the maximum number of containers that can be
 // running at the same time. This helps mitigate the impact of unexpected
@@ -70,3 +74,65 @@ exports.icsProxy = onRequest(async (req, res) => {
     res.status(502).send(`Upstream fetch failed: ${err.message}`);
   }
 });
+
+// Notifies a student by push when their community service form moves through
+// the signing/approval pipeline (signed by supervisor, approved, or
+// rejected) — so they don't have to keep reopening the app to check. Reuses
+// the same userTokens/{email} FCM token store that PushNotificationManager
+// .swift already maintains for grade/club notifications.
+const STATUS_MESSAGES = {
+  pending: (data) => ({
+    title: "Supervisor signed your form",
+    body: `${data.supervisorSignature || "Your supervisor"} signed ` +
+      `"${data.title}". It's now with your advisor for approval.`,
+  }),
+  approved: (data) => ({
+    title: "Service hours approved",
+    body: `"${data.title}" (${data.totalHours || 0} hrs) was approved.`,
+  }),
+  rejected: (data) => ({
+    title: "Service hours rejected",
+    body: data.rejectionReason ?
+      `"${data.title}" was rejected: ${data.rejectionReason}` :
+      `"${data.title}" was rejected.`,
+  }),
+};
+
+exports.onServiceFormStatusChange = onDocumentUpdated(
+    "serviceForms/{formId}",
+    async (event) => {
+      const before = event.data.before.data();
+      const after = event.data.after.data();
+      if (!before || !after || before.status === after.status) return;
+
+      // Only notify on the pending_signature -> pending transition (signed),
+      // not every write that touches status — resubmission also passes
+      // through "pending_signature" but that's the student's own action,
+      // not news to push to them.
+      const messageBuilder = after.status === "pending" ?
+        (before.status === "pending_signature" ?
+          STATUS_MESSAGES.pending : null) :
+        STATUS_MESSAGES[after.status];
+      if (!messageBuilder) return;
+
+      const studentId = after.studentId;
+      if (!studentId) return;
+
+      const tokenDoc = await admin.firestore()
+          .collection("userTokens").doc(studentId).get();
+      const tokenData = tokenDoc.data();
+      const token = tokenData && tokenData.fcmToken;
+      if (!token) return;
+
+      const {title, body} = messageBuilder(after);
+      try {
+        await admin.messaging().send({
+          token,
+          notification: {title, body},
+          apns: {payload: {aps: {sound: "default"}}},
+        });
+      } catch (err) {
+        logger.error("Failed to send service form status notification", err);
+      }
+    },
+);
