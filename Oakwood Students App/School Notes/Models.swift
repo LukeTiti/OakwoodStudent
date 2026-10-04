@@ -377,6 +377,60 @@ struct ServiceStatusBadge: View {
     }
 }
 
+// MARK: - Segmented Hours Bar
+
+/// A single progress bar split into two visibly distinct colored segments — outside-service
+/// hours and the rest of a student's approved hours — instead of two separate bars. Both
+/// segments size relative to the overall yearly requirement (not to each other), so the bar
+/// only fills completely once the full requirement is met, not just the outside minimum.
+struct SegmentedHoursBar: View {
+    let outsideHours: Double
+    let totalHours: Double
+    let requiredTotal: Double
+
+    private var otherHours: Double { max(totalHours - outsideHours, 0) }
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let outsideFraction = requiredTotal > 0 ? min(outsideHours / requiredTotal, 1) : 0
+            let otherFraction = requiredTotal > 0 ? min(otherHours / requiredTotal, 1 - outsideFraction) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.2))
+                HStack(spacing: 0) {
+                    Color.orange.frame(width: width * outsideFraction)
+                    Color.accentColor.frame(width: width * otherFraction)
+                }
+                .clipShape(Capsule())
+            }
+        }
+        .frame(height: 8)
+    }
+}
+
+/// Legend row for SegmentedHoursBar — color-matched labels for the outside and total figures,
+/// meant to sit directly beside/under the bar they describe.
+struct SegmentedHoursLegend: View {
+    let outsideHours: Double
+    let totalHours: Double
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                Circle().fill(Color.orange).frame(width: 8, height: 8)
+                Text("Outside \(outsideHours, specifier: "%.1f")/\(requiredOutsideServiceHoursPerYear, specifier: "%.0f")")
+            }
+            HStack(spacing: 4) {
+                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                Text("Total \(totalHours, specifier: "%.1f")/\(requiredServiceHoursPerYear, specifier: "%.0f")")
+            }
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+    }
+}
+
 // MARK: - Signature Image
 
 /// Renders a supervisor's drawn signature, stored as a base64 PNG (optionally

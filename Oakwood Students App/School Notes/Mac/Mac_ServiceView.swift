@@ -75,15 +75,13 @@ struct Mac_ServiceView: View {
             // counts approved forms, so it only moves once an advisor signs off.
             ForEach(hoursSummaries) { summary in
                 Section {
-                    ProgressView(value: min(summary.totalHours, requiredServiceHoursPerYear), total: requiredServiceHoursPerYear)
-                        .padding(.vertical, 2)
-                } header: {
-                    HStack {
-                        Text(schoolYearLabel(for: summary.year))
-                        Spacer()
-                        Text("\(summary.totalHours, specifier: "%.1f")/\(requiredServiceHoursPerYear, specifier: "%.0f") hrs · \(summary.outsideHours, specifier: "%.1f")/\(requiredOutsideServiceHoursPerYear, specifier: "%.0f") outside")
-                            .textCase(.none)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SegmentedHoursBar(outsideHours: summary.outsideHours, totalHours: summary.totalHours, requiredTotal: requiredServiceHoursPerYear)
+                        SegmentedHoursLegend(outsideHours: summary.outsideHours, totalHours: summary.totalHours)
                     }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text(schoolYearLabel(for: summary.year))
                 }
             }
 
