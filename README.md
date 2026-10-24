@@ -1,6 +1,8 @@
 # OakwwodStudent
 
-This is a combined project in between Carl-Philip Arnold and Luke Titi to help the Oakwood Sophmore Class. The website creates a new way for Students to help each other by uploading notes so that other students can make sure their notes have the correct/all of the information. The app creates a brand new Veracross view with a To Do page where you can keep track of assignments you havent completed yet.
-
-
-This Project, both the app and website are in beta/prototyping stages and do not refelct a completed product.
+This project to help Oakwood Students:
+- Be more organized with assignments
+- Easily see grades and receive notifications about updates
+- Digitally submit service hours
+- Explore calendar events and sign up to help with sports games
+- explore clubs and more!
