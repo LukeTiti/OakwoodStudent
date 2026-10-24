@@ -566,7 +566,7 @@ function renderPendingList(forms) {
 
 async function approveForm(form, btn) {
   btn.disabled = true;
-  setStatus(`Posting ${form.services?.length || 0} entr${form.services?.length === 1 ? "y" : "ies"} for ${form.studentName || form.personPK}…`);
+  setStatus(`Posting "${form.title}" for ${form.studentName || form.personPK}…`);
 
   try {
     const tab = await findVeracrossTab();
@@ -584,18 +584,35 @@ async function approveForm(form, btn) {
     // properly, so repeating it in free text would only duplicate it.
     const notes = form.title;
 
+    // One Veracross record per form, not per service entry: a form that logged 6 separate
+    // days used to land as 6 rows in the student's Veracross history. Entries are bucketed by
+    // the three things a single Veracross row can only hold one of — job category, grading
+    // period and school year — so a normal form is exactly one record, and one that mixes
+    // on-campus/outside work or spans a semester boundary splits into the minimum needed to
+    // keep the category totals and semester attribution correct.
+    const groups = new Map();
     for (const service of form.services || []) {
+      const key = [jobCategoryFor(service.description), computeGradingPeriod(service.date), computeSchoolYear(service.date)].join("|");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(service);
+    }
+
+    const recordPkByService = new Map();
+    for (const members of groups.values()) {
+      // Dated by the latest entry; the individual days stay visible in the form itself.
+      const latest = members.reduce((a, b) => (new Date(b.date) > new Date(a.date) ? b : a));
+      const totalHours = members.reduce((sum, m) => sum + Number(m.hours || 0), 0);
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: createInPage,
         args: [
           form.personPK,
-          service.hours,
+          totalHours,
           notes,
-          normalizeDate(service.date),
-          jobCategoryFor(service.description),
-          computeGradingPeriod(service.date),
-          computeSchoolYear(service.date),
+          normalizeDate(latest.date),
+          jobCategoryFor(latest.description),
+          computeGradingPeriod(latest.date),
+          computeSchoolYear(latest.date),
           form.organizationKey
         ]
       });
@@ -605,10 +622,14 @@ async function approveForm(form, btn) {
 
       if (recordPk != null) {
         anyNewIds = true;
-        updatedServices.push({ ...service, veracrossRecordId: recordPk });
-      } else {
-        updatedServices.push(service);
+        // Every entry folded into this record points at it, so the app can still map the
+        // Veracross row back to the form from any of them.
+        for (const m of members) recordPkByService.set(m, recordPk);
       }
+    }
+    for (const service of form.services || []) {
+      const recordPk = recordPkByService.get(service);
+      updatedServices.push(recordPk != null ? { ...service, veracrossRecordId: recordPk } : service);
     }
 
     // Record whichever entries actually got a Veracross id, independent of whether every
@@ -627,14 +648,14 @@ async function approveForm(form, btn) {
     const allOk = successFlags.length > 0 && successFlags.every(Boolean);
     if (!allOk) {
       setStatus(
-        `${successFlags.filter(Boolean).length}/${results.length} entries actually created in Veracross — NOT marking approved. Check you're logged into axiom.veracross.com and try again.`,
+        `${successFlags.filter(Boolean).length}/${results.length} Veracross records actually created in Veracross — NOT marking approved. Check you're logged into axiom.veracross.com and try again.`,
         "error"
       );
       return;
     }
 
     await markFormApproved(form.id);
-    setStatus(`Posted all ${results.length} entries and marked "${form.title}" approved.`, "ok");
+    setStatus(`Posted ${results.length} Veracross record${results.length === 1 ? "" : "s"} and marked "${form.title}" approved.`, "ok");
     const pending = await fetchPendingForms();
     renderPendingList(filterFormsByAdvisor(pending));
   } catch (err) {
