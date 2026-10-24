@@ -306,12 +306,15 @@ enum CalendarItem: Identifiable, Hashable {
 
 struct ServiceFormRow: View {
     let form: SubmittedForm
+    /// Overrides `form.totalHours` when the row stands for only part of the form (e.g. the slice
+    /// that landed in one school year's Veracross section).
+    var hoursOverride: Double? = nil
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(form.title).font(.body.weight(.semibold))
                 HStack(spacing: 4) {
-                    Text("\(form.totalHours, specifier: "%.1f") hrs")
+                    Text("\(hoursOverride ?? form.totalHours, specifier: "%.1f") hrs")
                     Text("·")
                     Text(form.submittedAt, style: .date)
                 }

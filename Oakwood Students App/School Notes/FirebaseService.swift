@@ -177,6 +177,21 @@ class FirebaseService {
         try await db.collection("serviceForms").document(formId).setData(data, merge: true)
     }
 
+    /// Writes a supervisor's signature onto a pending_signature form — the native twin of
+    /// public/sign/index.html's sign(). Must touch exactly these 6 fields and nothing else:
+    /// firestore.rules only lets an unauthenticated write through on a pending_signature -> pending
+    /// transition whose affectedKeys are limited to this set.
+    func signServiceForm(formId: String, name: String, title: String, email: String, signatureImageDataURL: String) async throws {
+        try await db.collection("serviceForms").document(formId).updateData([
+            "supervisorSignature": name,
+            "supervisorTitle": title,
+            "signerEmail": email,
+            "signatureImage": signatureImageDataURL,
+            "signedAt": FieldValue.serverTimestamp(),
+            "status": "pending"
+        ])
+    }
+
     func submitFormToAdvisor(formId: String) async throws {
         // "pending" matches advisor-portal's status vocabulary (its "Pending" tab filters on
         // this exact string) — don't rename without updating advisor-portal/index.html too.

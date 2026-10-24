@@ -60,6 +60,34 @@ struct ServiceView: View {
         }
     }
 
+    /// One row in a year's Veracross section. Every scraped row that traces back to the same
+    /// submitted form folds into a single `.form` item, so an approved form reads as one entry
+    /// (its own title) instead of one line per day that was logged on it.
+    struct VeracrossItem: Identifiable {
+        let id: String
+        var service: Service?
+        var form: SubmittedForm?
+        var hours: Double
+    }
+
+    private func veracrossItems(forYear year: String) -> [VeracrossItem] {
+        var items: [VeracrossItem] = []
+        var indexByFormID: [String: Int] = [:]
+        for service in servicesByYear[year] ?? [] {
+            if let match = veracrossIdToFormService[service.veracrossId ?? -1] {
+                if let index = indexByFormID[match.form.id] {
+                    items[index].hours += service.hours
+                } else {
+                    indexByFormID[match.form.id] = items.count
+                    items.append(VeracrossItem(id: "form-\(match.form.id)", service: nil, form: match.form, hours: service.hours))
+                }
+            } else {
+                items.append(VeracrossItem(id: service.id.uuidString, service: service, form: nil, hours: service.hours))
+            }
+        }
+        return items
+    }
+
     var body: some View {
         List {
                 // Progress toward the yearly requirement, one section per school year — only
@@ -100,6 +128,14 @@ struct ServiceView: View {
                         HStack {
                             Text("Logged Hours")
                             Spacer()
+                            if isSelecting {
+                                let allSelected = selectedIDs.count == appInfo.localServices.count
+                                Button(allSelected ? "Deselect All" : "Select All") {
+                                    selectedIDs = allSelected ? [] : Set(appInfo.localServices.map(\.id))
+                                }
+                                .font(.caption).textCase(.none)
+                                .padding(.trailing, 8)
+                            }
                             Button(isSelecting ? "Done" : "Select") {
                                 if isSelecting { selectedIDs.removeAll() }
                                 isSelecting.toggle()
@@ -132,12 +168,12 @@ struct ServiceView: View {
                 // Completed hours from Veracross
                 ForEach(sortedYears, id: \.self) { year in
                     Section(year) {
-                        ForEach(servicesByYear[year] ?? []) { service in
-                            if let match = veracrossIdToFormService[service.veracrossId ?? -1] {
-                                NavigationLink(destination: ServiceFormDetailView(form: match.form)) {
-                                    VeracrossServiceRow(service: service)
+                        ForEach(veracrossItems(forYear: year)) { item in
+                            if let form = item.form {
+                                NavigationLink(destination: ServiceFormDetailView(form: form)) {
+                                    ServiceFormRow(form: form, hoursOverride: item.hours)
                                 }
-                            } else {
+                            } else if let service = item.service {
                                 VeracrossServiceRow(service: service)
                             }
                         }
@@ -239,10 +275,12 @@ struct ServiceView: View {
 // MARK: - ServiceFormDetailView
 
 struct ServiceFormDetailView: View {
+    @EnvironmentObject var appInfo: AppInfo
     @State var form: SubmittedForm
     @State private var isSubmitting = false
     @State private var showMail = false
     @State private var showEditResubmit = false
+    @State private var showSignOnDevice = false
 
     var signingURL: String { "\(signingBaseURL)/\(form.id)" }
     var mailData: MailData { makeSigningMailData(to: form.supervisorEmail, studentName: "", title: form.title, totalHours: form.totalHours, signingURL: signingURL) }
@@ -295,6 +333,9 @@ struct ServiceFormDetailView: View {
                         Label("Resend Signing Email", systemImage: "envelope.arrow.triangle.branch")
                     }
                     .disabled(!MFMailComposeViewController.canSendMail())
+                    Button { showSignOnDevice = true } label: {
+                        Label("Sign on This Device", systemImage: "signature")
+                    }
                 case "signed":
                     Button {
                         isSubmitting = true
@@ -347,6 +388,14 @@ struct ServiceFormDetailView: View {
                 form = updated
             }
         }
+        .sheet(isPresented: $showSignOnDevice) {
+            SupervisorSigningSheet(form: form, studentName: appInfo.googleVM.userName) { name in
+                // Mirror what the Firestore write just did so this local copy doesn't keep
+                // offering to sign until the live listener catches up.
+                form.status = "pending"
+                form.supervisorSignature = name
+            }
+        }
     }
 
     @ViewBuilder private func reflectionRow(_ label: String, _ text: String) -> some View {
@@ -382,6 +431,9 @@ struct CreateFormSheet: View {
     @State private var errorMessage: String?
     @State private var showMail = false
     @State private var pendingMailData: MailData? = nil
+    /// When on, submitting skips the signing email and hands the phone to the supervisor instead.
+    @State private var signOnDevice = false
+    @State private var signingForm: SubmittedForm? = nil
 
     var selectedOrganization: ServiceOrganization? { organizations.first { $0.id == selectedOrganizationID } }
     var hasOutsideService: Bool { selectedServices.contains { $0.description == "Outside Community Service" } }
@@ -449,8 +501,11 @@ struct CreateFormSheet: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
+                    Toggle("Sign on this device", isOn: $signOnDevice)
                 } header: { Text("Supervisor") } footer: {
-                    Text("They'll receive an email with a link to review and sign the form.")
+                    Text(signOnDevice
+                         ? "After you continue, the supervisor reviews and signs the form right here on this device."
+                         : "They'll receive an email with a link to review and sign the form.")
                 }
 
                 Section("Advisor") {
@@ -500,11 +555,14 @@ struct CreateFormSheet: View {
             .sheet(isPresented: $showMail, onDismiss: { dismiss() }) {
                 if let data = pendingMailData { MailComposerView(data: data, isPresented: $showMail) }
             }
+            .sheet(item: $signingForm, onDismiss: { dismiss() }) { form in
+                SupervisorSigningSheet(form: form, studentName: studentName)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await submit() } } label: {
-                        if isSubmitting { ProgressView() } else { Text("Send for Signature") }
+                        if isSubmitting { ProgressView() } else { Text(signOnDevice ? "Continue to Sign" : "Send for Signature") }
                     }
                     .disabled(!canSubmit || isSubmitting)
                 }
@@ -546,7 +604,9 @@ struct CreateFormSheet: View {
 
             await MainActor.run {
                 onSuccess(submittedForm)
-                if MFMailComposeViewController.canSendMail() {
+                if signOnDevice {
+                    signingForm = submittedForm
+                } else if MFMailComposeViewController.canSendMail() {
                     pendingMailData = mailData
                     showMail = true
                 } else {
@@ -587,6 +647,8 @@ struct EditAndResubmitSheet: View {
     @State private var errorMessage: String?
     @State private var showMail = false
     @State private var pendingMailData: MailData? = nil
+    @State private var signOnDevice = false
+    @State private var signingForm: SubmittedForm? = nil
 
     init(form: SubmittedForm, onSuccess: @escaping (SubmittedForm) -> Void) {
         self.form = form
@@ -680,8 +742,11 @@ struct EditAndResubmitSheet: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
+                    Toggle("Sign on this device", isOn: $signOnDevice)
                 } header: { Text("Supervisor") } footer: {
-                    Text("They'll receive a fresh email with a link to review and re-sign the form.")
+                    Text(signOnDevice
+                         ? "After you continue, the supervisor reviews and re-signs the form right here on this device."
+                         : "They'll receive a fresh email with a link to review and re-sign the form.")
                 }
 
                 Section("Advisor") {
@@ -736,11 +801,14 @@ struct EditAndResubmitSheet: View {
             .sheet(isPresented: $showMail, onDismiss: { dismiss() }) {
                 if let data = pendingMailData { MailComposerView(data: data, isPresented: $showMail) }
             }
+            .sheet(item: $signingForm, onDismiss: { dismiss() }) { form in
+                SupervisorSigningSheet(form: form, studentName: appInfo.googleVM.userName)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await submit() } } label: {
-                        if isSubmitting { ProgressView() } else { Text("Resubmit") }
+                        if isSubmitting { ProgressView() } else { Text(signOnDevice ? "Continue to Sign" : "Resubmit") }
                     }
                     .disabled(!canSubmit || isSubmitting)
                 }
@@ -793,7 +861,9 @@ struct EditAndResubmitSheet: View {
 
             await MainActor.run {
                 onSuccess(resubmittedForm)
-                if MFMailComposeViewController.canSendMail() {
+                if signOnDevice {
+                    signingForm = resubmittedForm
+                } else if MFMailComposeViewController.canSendMail() {
                     pendingMailData = mailData
                     showMail = true
                 } else {
@@ -828,6 +898,218 @@ struct EditableServiceEntryRow: View {
         }
         .padding(.vertical, 2)
     }
+}
+
+// MARK: - SupervisorSigningSheet
+
+/// Native twin of public/sign/index.html — lets a supervisor who's physically with the student
+/// review the form and sign on this device instead of via the emailed link. Writes exactly the
+/// same fields through FirebaseService.signServiceForm, so everything downstream (the "supervisor
+/// signed" push, the advisor queue, MatchIndicator checks) behaves identically to a web signature.
+///
+/// The name/title/email fields deliberately start blank rather than prefilled from what the
+/// student typed: the form detail view compares the typed signer email against the supervisor
+/// email the student entered, and prefilling would make that check meaningless.
+struct SupervisorSigningSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let form: SubmittedForm
+    let studentName: String
+    var onSigned: (String) -> Void = { _ in }
+
+    @State private var sigName = ""
+    @State private var sigTitle = ""
+    @State private var sigEmail = ""
+    @State private var strokes: [[CGPoint]] = []
+    @State private var padSize: CGSize = .zero
+    @State private var certified = false
+    @State private var isSigning = false
+    @State private var errorMessage: String?
+    @State private var signedName: String?
+
+    private var emailLooksValid: Bool {
+        sigEmail.trimmingCharacters(in: .whitespaces).range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil
+    }
+    private var canSign: Bool {
+        !sigName.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !sigTitle.trimmingCharacters(in: .whitespaces).isEmpty &&
+        emailLooksValid && certified && !strokes.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let signedName {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 56)).foregroundColor(.green)
+                        Text("Form Signed").font(.title2.bold())
+                        Text("Thank you, \(signedName). This form has been sent to the student's advisor for approval.")
+                            .multilineTextAlignment(.center).foregroundColor(.secondary)
+                        Text("You can hand the device back now.").font(.footnote).foregroundColor(.secondary)
+                    }
+                    .padding(32)
+                } else {
+                    signingForm
+                }
+            }
+            .navigationTitle(signedName == nil ? "Supervisor Signature" : "Done")
+            .inlineNavigationBarTitle()
+            .interactiveDismissDisabled(isSigning)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if signedName == nil { Button("Cancel") { dismiss() }.disabled(isSigning) }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if signedName != nil { Button("Done") { dismiss() } }
+                }
+            }
+        }
+    }
+
+    private var signingForm: some View {
+        Form {
+            Section {
+                Text(form.title).font(.headline)
+                LabeledContent("Student", value: studentName)
+                LabeledContent("Total Hours", value: String(format: "%.1f hrs", form.totalHours))
+            }
+
+            Section("Service Entries") {
+                ForEach(form.services) { s in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text(s.notes); Spacer(); Text("\(s.hours, specifier: "%.1f") hrs").foregroundColor(.secondary) }
+                        Text("\(s.date) · \(s.description)").font(.caption).foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            let reflections = [form.reflection1, form.reflection2, form.reflection3]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if !reflections.isEmpty {
+                Section("Reflections") {
+                    ForEach(Array(reflections.enumerated()), id: \.offset) { index, text in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Reflection \(index + 1)").font(.caption).foregroundColor(.secondary)
+                            Text(text)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                TextField("Print your full name", text: $sigName)
+                TextField("Your title/position (e.g. Program Director)", text: $sigTitle)
+                TextField("Your email address", text: $sigEmail)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+            } header: { Text("Electronic Signature") } footer: {
+                Text("By printing your name, drawing your signature, and checking the box below, you certify that the service hours listed above are accurate to the best of your knowledge.")
+            }
+
+            Section {
+                SignaturePad(strokes: $strokes, size: $padSize)
+                    .listRowInsets(EdgeInsets())
+                Button("Clear Signature") { strokes.removeAll() }
+                    .disabled(strokes.isEmpty)
+            } header: { Text("Draw your signature below") }
+
+            Section {
+                Toggle("I certify that the information above is accurate and I approve these service hours for \(studentName).", isOn: $certified)
+                Button { Task { await sign() } } label: {
+                    HStack {
+                        Spacer()
+                        if isSigning { ProgressView() } else { Text("Sign Form").bold() }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSign || isSigning)
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+            }
+        }
+    }
+
+    private func sign() async {
+        isSigning = true; errorMessage = nil
+        guard let dataURL = renderSignatureDataURL(strokes: strokes, size: padSize) else {
+            errorMessage = "Couldn't capture the signature. Please clear it and try again."
+            isSigning = false
+            return
+        }
+        let name = sigName.trimmingCharacters(in: .whitespaces)
+        do {
+            try await FirebaseService.shared.signServiceForm(
+                formId: form.id, name: name,
+                title: sigTitle.trimmingCharacters(in: .whitespaces),
+                email: sigEmail.trimmingCharacters(in: .whitespaces),
+                signatureImageDataURL: dataURL)
+            await MainActor.run { signedName = name; isSigning = false; onSigned(name) }
+        } catch {
+            await MainActor.run { errorMessage = "Failed to submit signature: \(error.localizedDescription)"; isSigning = false }
+        }
+    }
+}
+
+// MARK: - SignaturePad
+
+private func strokePath(_ points: [CGPoint]) -> Path {
+    var path = Path()
+    guard let first = points.first else { return path }
+    path.move(to: first)
+    // A single tap has no segments; a zero-length line with a round cap still renders as a dot.
+    if points.count == 1 { path.addLine(to: first) }
+    for point in points.dropFirst() { path.addLine(to: point) }
+    return path
+}
+
+private let signatureStrokeStyle = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+
+/// Finger-drawn signature canvas. Strokes are kept as raw point lists so the exact same data
+/// can be re-rendered to a PNG at upload time (see renderSignatureDataURL).
+struct SignaturePad: View {
+    @Binding var strokes: [[CGPoint]]
+    @Binding var size: CGSize
+    @State private var isDrawing = false
+
+    var body: some View {
+        Canvas { context, _ in
+            for stroke in strokes {
+                context.stroke(strokePath(stroke), with: .color(.black), style: signatureStrokeStyle)
+            }
+        }
+        .frame(height: 160)
+        .background(Color.white)
+        .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
+        // highPriorityGesture so a drag draws instead of scrolling the surrounding Form.
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if isDrawing {
+                        strokes[strokes.count - 1].append(value.location)
+                    } else {
+                        strokes.append([value.location])
+                        isDrawing = true
+                    }
+                }
+                .onEnded { _ in isDrawing = false }
+        )
+    }
+}
+
+/// Renders the strokes to a transparent PNG and wraps it as a `data:` URI — the same format the
+/// web sign page stores (canvas.toDataURL), which SignatureImageView and the advisor tools read.
+@MainActor
+private func renderSignatureDataURL(strokes: [[CGPoint]], size: CGSize) -> String? {
+    guard size.width > 0, size.height > 0, !strokes.isEmpty else { return nil }
+    let content = Canvas { context, _ in
+        for stroke in strokes {
+            context.stroke(strokePath(stroke), with: .color(Color(white: 0.11)), style: signatureStrokeStyle)
+        }
+    }
+    .frame(width: size.width, height: size.height)
+    let renderer = ImageRenderer(content: content)
+    renderer.scale = 2
+    guard let png = renderer.uiImage?.pngData() else { return nil }
+    return "data:image/png;base64," + png.base64EncodedString()
 }
 
 // MARK: - Mail Composer
@@ -867,17 +1149,47 @@ struct AddServiceSheet: View {
     @State private var hours = ""
     @State private var date = Date()
     @State private var description = "Outside Community Service"
+    /// When on, the single DatePicker is swapped for a MultiDatePicker and one identical entry
+    /// (same activity, type, and hours) is logged per selected day.
+    @State private var multipleDays = false
+    @State private var selectedDays: Set<DateComponents> = []
     let descriptions = ["Outside Community Service", "Oakwood Service"]
+
+    /// MultiDatePicker only takes a closed-off Range<Date> (no `...Date()`), so cap at the end of
+    /// today — past days and today are selectable, future ones aren't.
+    private var selectableDays: Range<Date> {
+        let startOfTomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+        return Date.distantPast..<startOfTomorrow
+    }
+    private var hoursValue: Double { Double(hours) ?? 0 }
+    /// Selected days resolved to real Dates, oldest first (a Set has no order of its own).
+    private var sortedDays: [Date] {
+        selectedDays.compactMap { Calendar.current.date(from: $0) }.sorted()
+    }
+    private var entryCount: Int { multipleDays ? sortedDays.count : 1 }
+    private var canAdd: Bool { !notes.isEmpty && !hours.isEmpty && (!multipleDays || !selectedDays.isEmpty) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Activity (e.g. Food Bank)", text: $notes)
-                    TextField("Hours", text: $hours).keyboardType(.decimalPad)
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField(multipleDays ? "Hours per day" : "Hours", text: $hours).keyboardType(.decimalPad)
                     Picker("Type", selection: $description) {
                         ForEach(descriptions, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+
+                Section {
+                    Toggle("Multiple days", isOn: $multipleDays.animation())
+                    if multipleDays {
+                        MultiDatePicker("Dates", selection: $selectedDays, in: selectableDays)
+                    } else {
+                        DatePicker("Date", selection: $date, displayedComponents: .date)
+                    }
+                } footer: {
+                    if multipleDays && !selectedDays.isEmpty {
+                        Text("\(selectedDays.count) days · \(hoursValue * Double(selectedDays.count), specifier: "%.1f") hrs total")
                     }
                 }
             }
@@ -886,13 +1198,16 @@ struct AddServiceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
+                    Button(entryCount > 1 ? "Add \(entryCount)" : "Add") {
                         let f = DateFormatter(); f.dateFormat = "MM/dd/yyyy"
-                        appInfo.localServices.append(LocalService(date: f.string(from: date), description: description,
-                                                      notes: notes, hours: Double(hours) ?? 0))
+                        let dates = multipleDays ? sortedDays : [date]
+                        for d in dates {
+                            appInfo.localServices.append(LocalService(date: f.string(from: d), description: description,
+                                                          notes: notes, hours: hoursValue))
+                        }
                         dismiss()
                     }
-                    .disabled(notes.isEmpty || hours.isEmpty)
+                    .disabled(!canAdd)
                 }
             }
         }

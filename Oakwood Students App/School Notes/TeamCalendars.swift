@@ -22,6 +22,14 @@ struct SchoolCalendarFeed {
 // level so events can be tagged and filtered like sports already are. The old Veracross
 // feed only had generic scheduling milestones (trimester/semester begin markers,
 // bell-schedule day-type labels) and was missing most real events entirely.
+//
+// No "All School" entry for now: oakwoodway.org's calendar_2808.ics started returning "Invalid
+// UUID" (a real, live bug on the site's end, confirmed via its Cloudflare behavior and
+// independently via a failed macOS Calendar subscription attempt — not a bot-blocking false
+// positive) after the site appears to have migrated its Finalsite calendar widget
+// ("data-use-new=true" in its own markup). The Veracross feed is the same limited one the
+// comment above warns about (pure day-type/trimester labels, zero real named events) — worse
+// than just omitting the category. Needs a real fix from whoever manages oakwoodway.org.
 let schoolEventCalendars: [SchoolCalendarFeed] = [
     SchoolCalendarFeed(category: "High School", url: "https://www.oakwoodway.org/calendar/calendar_2811.ics"),
     SchoolCalendarFeed(category: "Middle School", url: "https://www.oakwoodway.org/calendar/calendar_2810.ics"),
