@@ -23,7 +23,14 @@ struct ClubsView: View {
         }
     }
 
+    // Own NavigationStack like Home/To Do/Grades: without it, a pushed club detail is hosted by
+    // whatever navigation controller happens to be above this tab (the "More" overflow, with this
+    // many tabs), and gets popped whenever appInfo re-publishes — which CloudSync does constantly.
     var body: some View {
+        NavigationStack { clubList }
+    }
+
+    private var clubList: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Clubs").font(.largeTitle.bold())
@@ -271,7 +278,11 @@ struct ClubDetailView: View {
         }
         .onAppear {
             appInfo.markClubViewed(club.id)
-            appInfo.clubsWithUnreadAnnouncements.remove(club.id)
+            // Guarded: a @Published write fires objectWillChange even when nothing changes, and
+            // this runs mid-push.
+            if appInfo.clubsWithUnreadAnnouncements.contains(club.id) {
+                appInfo.clubsWithUnreadAnnouncements.remove(club.id)
+            }
             Task {
                 // Officer photos are Veracross-hosted and need an authenticated session to
                 // load, same as any other Veracross image/document — unlike events/announcements
