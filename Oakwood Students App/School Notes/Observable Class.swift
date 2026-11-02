@@ -40,6 +40,8 @@ class AppInfo: ObservableObject {
     var totalUnreadAssignments: Int {
         courses.flatMap { $0.assignments ?? [] }.filter { $0.is_unread == 1 }.count
     }
+    /// True while loadAllAssignments() is in flight — drives the "Updating…" pill on To Do.
+    @Published var isFetchingAssignments = false
     @Published var fetchedGrades: [String] = []
     @Published var resourceAssignmentIds: Set<Int> = []
     @Published var personPK: Int? = nil
@@ -1049,7 +1051,16 @@ class AppInfo: ObservableObject {
             do {
                 let decoded = try JSONDecoder().decode(CoursesResponse.self, from: data)
                 await MainActor.run {
-                    self.courses = decoded.courses
+                    // The course-list endpoint carries no assignments. Carry over the ones we
+                    // already have (cached from last launch or an earlier load) so the To Do list
+                    // doesn't blank out and refill course-by-course on every refresh.
+                    let existing = Dictionary(self.courses.compactMap { c in c.enrollment_pk.map { ($0, c.assignments) } },
+                                              uniquingKeysWith: { first, _ in first })
+                    var fresh = decoded.courses
+                    for i in fresh.indices where fresh[i].assignments == nil {
+                        if let pk = fresh[i].enrollment_pk, let old = existing[pk] { fresh[i].assignments = old }
+                    }
+                    self.courses = fresh
                 }
                 await fetchPersonPK()
                 if personalCalendarURL == nil { await fetchPersonalCalendarURL() }
@@ -1079,8 +1090,17 @@ class AppInfo: ObservableObject {
     /// Fetches assignments for a single course and stores them in `self.courses`.
     /// Returns an error string on failure, or nil on success.
     func loadAssignments(courseID: Int) async -> String? {
+        let result = await fetchAssignments(courseID: courseID)
+        if let error = result.error { return error }
+        await MainActor.run { applyAssignments(result.assignments, toCourseID: courseID) }
+        return nil
+    }
+
+    /// Network + decode only; doesn't touch `courses`, so callers can fetch every course first
+    /// and apply them in a single published change.
+    private func fetchAssignments(courseID: Int) async -> (assignments: [Assignment], error: String?) {
         guard let url = URL(string: "https://portals-embed.veracross.com/oakwood/student/enrollment/\(courseID)/assignments") else {
-            return "Invalid URL"
+            return ([], "Invalid URL")
         }
 
         var request = URLRequest(url: url)
@@ -1091,13 +1111,8 @@ class AppInfo: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
 
-            guard status == 200 else {
-                return "Server returned status \(status)"
-            }
-
-            guard isJSONResponse(response, data: data) else {
-                return "Not authenticated. Please log in."
-            }
+            guard status == 200 else { return ([], "Server returned status \(status)") }
+            guard isJSONResponse(response, data: data) else { return ([], "Not authenticated. Please log in.") }
 
             do {
                 let decoded = try JSONDecoder().decode(AssignmentResponse.self, from: data)
@@ -1108,18 +1123,19 @@ class AppInfo: ObservableObject {
                         assignmentsWithAttachments[i].attachments = attachmentsByID[id]
                     }
                 }
-                await MainActor.run {
-                    if let idx = self.courses.firstIndex(where: { $0.enrollment_pk == courseID }) {
-                        self.courses[idx].assignments = assignmentsWithAttachments
-                    }
-                }
-                return nil
+                return (assignmentsWithAttachments, nil)
             } catch {
                 let textPreview = String(data: data, encoding: .utf8) ?? "Unable to decode"
-                return "Decoding error: \(error.localizedDescription)\nPreview: \(textPreview.prefix(200))"
+                return ([], "Decoding error: \(error.localizedDescription)\nPreview: \(textPreview.prefix(200))")
             }
         } catch {
-            return "Network error: \(error.localizedDescription)"
+            return ([], "Network error: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor private func applyAssignments(_ assignments: [Assignment], toCourseID courseID: Int) {
+        if let idx = courses.firstIndex(where: { $0.enrollment_pk == courseID }) {
+            courses[idx].assignments = assignments
         }
     }
 
@@ -1158,22 +1174,36 @@ class AppInfo: ObservableObject {
     func loadAllAssignments() async -> String? {
         var errors: [String] = []
         let courseIDs = courses.compactMap { $0.enrollment_pk }
-        await MainActor.run { bulkLoadingAssignmentsDepth += 1 }
-        for courseID in courseIDs {
-            if let err = await loadAssignments(courseID: courseID) {
-                errors.append(err)
-            } else {
-                await MainActor.run {
-                    initializeCompletionStatus(forCourseID: courseID)
+        await MainActor.run { bulkLoadingAssignmentsDepth += 1; isFetchingAssignments = true }
+        // Fetch every course first, then apply them all in one go. Applying course-by-course
+        // republished `courses` after each one, so the To Do list visibly reshuffled and filled in
+        // piecemeal even though the cached copy was already on screen.
+        var fetched: [Int: [Assignment]] = [:]
+        await withTaskGroup(of: (Int, [Assignment], String?).self) { group in
+            for courseID in courseIDs {
+                group.addTask { [self] in
+                    let r = await fetchAssignments(courseID: courseID)
+                    return (courseID, r.assignments, r.error)
                 }
             }
+            for await (courseID, assignments, error) in group {
+                if let error { errors.append(error) } else { fetched[courseID] = assignments }
+            }
+        }
+        await MainActor.run {
+            var updated = courses
+            for i in updated.indices {
+                if let pk = updated[i].enrollment_pk, let assignments = fetched[pk] { updated[i].assignments = assignments }
+            }
+            courses = updated
+            for courseID in fetched.keys { initializeCompletionStatus(forCourseID: courseID) }
         }
         // Only once every course has actually finished — and only once every overlapping call to
         // this function has, per bulkLoadingAssignmentsDepth above — does the real, complete state
         // get pushed to CloudKit, rather than after each individual course.
         await MainActor.run {
             bulkLoadingAssignmentsDepth -= 1
-            if bulkLoadingAssignmentsDepth == 0 { scheduleAssignmentInfoPush() }
+            if bulkLoadingAssignmentsDepth == 0 { isFetchingAssignments = false; scheduleAssignmentInfoPush() }
         }
         await MainActor.run { saveAssignmentsForWidget() }
         let snapshot = await MainActor.run { (courses: self.courses, info: self.info) }
@@ -1615,15 +1645,20 @@ class AppInfo: ObservableObject {
     }
 
     func parseICalDate(_ str: String) -> Date {
-        let formats: [(String, TimeZone?)] = [
-            ("yyyyMMdd'T'HHmmss'Z'", TimeZone(identifier: "UTC")),
-            ("yyyyMMdd'T'HHmmss", nil),
-            ("yyyyMMdd", nil)
-        ]
+        // Only a trailing "Z" means UTC. Everything else is a "floating" local time (what the school
+        // calendar sends: `DTSTART:20261030T160000` for a 4 PM event) and must be read in the
+        // device's zone. Trying the `'Z'` format on a string without a Z let DateFormatter's
+        // lenient literal matching accept it as UTC, which shifted those events by the UTC offset.
+        let isUTC = str.hasSuffix("Z")
+        let formats: [(String, TimeZone)] = isUTC
+            ? [("yyyyMMdd'T'HHmmss'Z'", TimeZone(identifier: "UTC")!)]
+            : [("yyyyMMdd'T'HHmmss", .current), ("yyyyMMdd", .current)]
         for (format, tz) in formats {
             let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.isLenient = false
             f.dateFormat = format
-            if let tz = tz { f.timeZone = tz }
+            f.timeZone = tz
             if let d = f.date(from: str) { return d }
         }
         return Date()

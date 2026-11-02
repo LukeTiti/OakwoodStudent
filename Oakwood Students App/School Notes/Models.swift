@@ -96,6 +96,15 @@ extension Assignment {
         return cal.date(from: DateComponents(year: year, month: month, day: day))
     }
 
+    /// Veracross marks assignments that don't count as "NREQ" / "Not Required" — in the score
+    /// or the completion status depending on the record, so check both.
+    var isNotRequired: Bool {
+        [raw_score, completion_status].contains { value in
+            guard let v = value?.trimmingCharacters(in: .whitespaces).lowercased() else { return false }
+            return v == "nreq" || v == "not required" || v == "not req"
+        }
+    }
+
     var gradePercent: Double? {
         guard let raw = raw_score, let score = Double(raw),
               let max = maximum_score, max > 0 else { return nil }
@@ -246,9 +255,7 @@ struct SportsEvent: Identifiable, Hashable {
         return opp.trimmingCharacters(in: .whitespaces)
     }
 
-    var timeText: String {
-        endTime.isEmpty ? startTime : "\(startTime) - \(endTime)"
-    }
+    var timeText: String { eventTimeText(start: startTime, end: endTime) }
 }
 
 // MARK: - School Event
@@ -262,9 +269,14 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
     let description: String
     var category: String = "School Events"  // which school-level feed this came from — see schoolEventCalendars
 
-    var timeText: String {
-        endTime.isEmpty ? startTime : "\(startTime) - \(endTime)"
-    }
+    var timeText: String { eventTimeText(start: startTime, end: endTime) }
+}
+
+/// Display text for an event's time. A start of exactly 12:00 AM is how feeds encode "no time"
+/// (all-day events), so show that instead of a midnight range.
+func eventTimeText(start: String, end: String) -> String {
+    if start == "12:00 AM" { return "All day" }
+    return end.isEmpty ? start : "\(start) - \(end)"
 }
 
 // MARK: - Calendar Item (unified wrapper)
@@ -298,6 +310,22 @@ enum CalendarItem: Identifiable, Hashable {
         case .school(let e): return e.category
         case .personal: return "My Schedule"
         case .practice: return "Practices"
+        }
+    }
+}
+
+extension Array where Element == CalendarItem {
+    /// School-wide and per-division feeds (e.g. All School + Middle School) each carry their own copy
+    /// of shared events like "End of First Trimester", under different UIDs. Call this *after*
+    /// applying the category filter so an event still shows when only one of its feeds is selected,
+    /// but appears once when several are.
+    func removingDuplicateSchoolEvents() -> [CalendarItem] {
+        var seen = Set<String>()
+        return filter { item in
+            guard case .school(let e) = item else { return true }
+            let key = [e.title.lowercased().trimmingCharacters(in: .whitespaces),
+                       String(e.date.timeIntervalSince1970), e.endTime, e.location.lowercased()].joined(separator: "|")
+            return seen.insert(key).inserted
         }
     }
 }
@@ -585,7 +613,16 @@ extension View {
 
 // MARK: - Link Detection
 
-func linkedAttributedString(from text: String) -> AttributedString {
+extension String {
+    /// Veracross sends assignment notes with HTML entities still encoded (`&amp;`, `&#39;`, `&nbsp;`…).
+    var htmlDecoded: String {
+        guard contains("&") else { return self }
+        return ((try? Entities.unescape(self)) ?? self).replacingOccurrences(of: "\u{00A0}", with: " ")
+    }
+}
+
+func linkedAttributedString(from rawText: String) -> AttributedString {
+    let text = rawText.htmlDecoded
     var attributed = AttributedString(text)
     guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
         return attributed
@@ -2113,6 +2150,12 @@ private func parseDirectoryEntry(_ entry: Element) -> DirectoryPerson? {
 // class names — so this reuses parseDirectoryEntry directly instead of a separate generic
 // parser, producing real DirectoryPerson results (name, grade, photo, households) instead of
 // a stripped-down custom model.
+
+/// Veracross grading period for "now": 2 = Semester 1 (July–Dec), 6 = Semester 2 (Jan–June).
+/// Same July cutoff the advisor extension uses for service hours.
+func currentGradingPeriod(on date: Date = Date()) -> Int {
+    Calendar.current.component(.month, from: date) >= 7 ? 2 : 6
+}
 
 /// Per-session cache of class rosters, keyed by class_id. Without this, viewing multiple
 /// directory profiles would each independently re-fetch every one of the student's classes'

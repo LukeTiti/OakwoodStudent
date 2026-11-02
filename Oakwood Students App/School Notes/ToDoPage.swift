@@ -17,6 +17,8 @@ struct ToDoPage: View {
 
     @State private var showNTIs = false
     @State private var showToast = false
+    /// Pull-to-refresh already shows its own spinner, so the "Updating…" pill stays out of the way.
+    @State private var isPullRefreshing = false
     @State private var toastScoreId = 0
     @State private var toastDismissTask: Task<Void, Never>?
 
@@ -143,6 +145,8 @@ struct ToDoPage: View {
                 }
             }
             .refreshable {
+                isPullRefreshing = true
+                defer { isPullRefreshing = false }
                 await syncCookies()
                 _ = await appInfo.loadCourses()
                 _ = await appInfo.loadAllAssignments()
@@ -177,6 +181,23 @@ struct ToDoPage: View {
                     .environmentObject(appInfo)
             }
         }
+        .overlay(alignment: .bottom) {
+            if appInfo.isFetchingAssignments && !isPullRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Updating assignments…")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.primary.opacity(0.08)))
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: appInfo.isFetchingAssignments && !isPullRefreshing)
         .overlay(alignment: .bottom) {
             if showToast {
                 toastView
@@ -267,6 +288,9 @@ struct ShowAssignment: View {
                     if assignment.completion_status == "Not Turned In" {
                         Text("NTI")
                             .foregroundColor(.red)
+                    } else if assignment.isNotRequired {
+                        Text("NREQ")
+                            .foregroundStyle(Color.primary)
                     } else if let percent = assignment.gradePercent {
                         Text("\(assignment.raw_score ?? "") / \(assignment.maximum_score ?? 0)")
                             .foregroundStyle(Color.primary)

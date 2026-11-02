@@ -346,7 +346,7 @@ struct GradeShareCard: View {
                     .foregroundColor(.white.opacity(0.8))
 
                 if let notes = assignment.assignment_notes, !notes.isEmpty {
-                    Text(notes)
+                    Text(notes.htmlDecoded)
                         .font(.callout)
                         .foregroundColor(.white.opacity(0.85))
                         .lineLimit(3)
@@ -586,7 +586,7 @@ struct CourseGradeDetailSheet: View {
     @EnvironmentObject var appInfo: AppInfo
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedPeriod = 6  // 6 = S2 (current), 2 = S1
+    @State private var selectedPeriod = currentGradingPeriod()  // 2 = S1, 6 = S2
     @State private var result: GradeDetailResult? = nil
     @State private var isLoading = false
 

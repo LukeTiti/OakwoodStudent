@@ -473,6 +473,7 @@ struct CalendarView: View {
         let today = Calendar.current.startOfDay(for: Date())
         var filtered = appInfo.calendarItems.filter { if case .personal = $0 { return false }; return true; }
         if !selectedCategories.isEmpty { filtered = filtered.filter { selectedCategories.contains($0.category) } }
+        filtered = filtered.removingDuplicateSchoolEvents()
         filtered = selectedTab == 0 ? filtered.filter { $0.date >= today } : filtered.filter { $0.date < today }
         return filtered
     }

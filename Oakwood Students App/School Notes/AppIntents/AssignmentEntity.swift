@@ -48,7 +48,7 @@ struct AssignmentEntity: IndexedEntity {
             components.minute = classTime.minute
             return components
         }
-        self.note = assignment.assignment_notes
+        self.note = assignment.assignment_notes?.htmlDecoded
         self.isFlagged = false
         self.creationDate = nil
         self.completionDate = nil

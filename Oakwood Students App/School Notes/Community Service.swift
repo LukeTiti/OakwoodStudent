@@ -25,6 +25,7 @@ struct ServiceView: View {
     @State private var showCreateForm = false
     @State private var isSelecting = false
     @State private var selectedIDs: Set<UUID> = []
+    @State private var showDeleteSelectedConfirm = false
     @State private var listener: ListenerRegistration?
 
     var pdfURL: URL? { appInfo.personPK.flatMap { URL(string: "https://documents.veracross.com/oakwood/volunteer_hours/\($0).pdf") } }
@@ -117,6 +118,7 @@ struct ServiceView: View {
                                 LocalServiceRow(service: service)
                             }
                             .contentShape(Rectangle())
+                            .opacity(isSelecting && !isSelectable(service) ? 0.4 : 1)
                             .onTapGesture { if isSelecting { toggleSelection(service) } }
                             .swipeActions(edge: .trailing) {
                                 if !isSelecting {
@@ -129,9 +131,10 @@ struct ServiceView: View {
                             Text("Logged Hours")
                             Spacer()
                             if isSelecting {
-                                let allSelected = selectedIDs.count == appInfo.localServices.count
+                                let targets = selectAllTargets
+                                let allSelected = !targets.isEmpty && targets.allSatisfy { selectedIDs.contains($0.id) }
                                 Button(allSelected ? "Deselect All" : "Select All") {
-                                    selectedIDs = allSelected ? [] : Set(appInfo.localServices.map(\.id))
+                                    selectedIDs = allSelected ? [] : Set(targets.map(\.id))
                                 }
                                 .font(.caption).textCase(.none)
                                 .padding(.trailing, 8)
@@ -143,12 +146,26 @@ struct ServiceView: View {
                             .font(.caption).textCase(.none)
                         }
                     } footer: {
+                        if isSelecting && selectedIDs.isEmpty && Set(appInfo.localServices.map(\.description)).count > 1 {
+                            Text("Inside and outside hours go on separate forms — pick one type per form.")
+                        }
                         if isSelecting && !selectedIDs.isEmpty {
-                            Button { showCreateForm = true } label: {
-                                Label("Create Form (\(selectedIDs.count) entries · \(selectedTotalHours, specifier: "%.1f") hrs)", systemImage: "doc.badge.plus")
-                                    .frame(maxWidth: .infinity)
+                            VStack(spacing: 8) {
+                                Button { showCreateForm = true } label: {
+                                    Label("Create Form (\(selectedIDs.count) entries · \(selectedTotalHours, specifier: "%.1f") hrs)", systemImage: "doc.badge.plus")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                Button(role: .destructive) { showDeleteSelectedConfirm = true } label: {
+                                    Label("Delete \(selectedIDs.count) \(selectedIDs.count == 1 ? "Entry" : "Entries")", systemImage: "trash")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .confirmationDialog("Delete \(selectedIDs.count) logged \(selectedIDs.count == 1 ? "entry" : "entries")?",
+                                                    isPresented: $showDeleteSelectedConfirm, titleVisibility: .visible) {
+                                    Button("Delete", role: .destructive) { deleteSelected() }
+                                }
                             }
-                            .buttonStyle(.borderedProminent)
                             .padding(.top, 4)
                         }
                     }
@@ -255,8 +272,29 @@ struct ServiceView: View {
             }
     }
 
+    /// A form becomes one Veracross record per job category, so inside (Oakwood) and outside
+    /// hours can't share a form: once something is selected, only that type stays selectable.
+    private var activeSelectionType: String? {
+        appInfo.localServices.first { selectedIDs.contains($0.id) }?.description
+    }
+    private func isSelectable(_ s: LocalService) -> Bool {
+        activeSelectionType == nil || activeSelectionType == s.description
+    }
+    /// What "Select All" covers: the type already selected, otherwise the first entry's type.
+    private var selectAllTargets: [LocalService] {
+        guard let type = activeSelectionType ?? appInfo.localServices.first?.description else { return [] }
+        return appInfo.localServices.filter { $0.description == type }
+    }
+
     private func toggleSelection(_ s: LocalService) {
-        if selectedIDs.contains(s.id) { selectedIDs.remove(s.id) } else { selectedIDs.insert(s.id) }
+        if selectedIDs.contains(s.id) { selectedIDs.remove(s.id) }
+        else if isSelectable(s) { selectedIDs.insert(s.id) }
+    }
+
+    private func deleteSelected() {
+        appInfo.localServices.removeAll { selectedIDs.contains($0.id) }
+        selectedIDs.removeAll()
+        isSelecting = false
     }
 
     private func deleteEntry(_ s: LocalService) {
@@ -1149,10 +1187,15 @@ struct AddServiceSheet: View {
     @State private var hours = ""
     @State private var date = Date()
     @State private var description = "Outside Community Service"
-    /// When on, the single DatePicker is swapped for a MultiDatePicker and one identical entry
-    /// (same activity, type, and hours) is logged per selected day.
+    /// Multi-day mode: tapping a day on the calendar immediately asks for that day's hours (they
+    /// vary day to day), and the day shows up in the list under the calendar. Tapping a highlighted
+    /// day again removes it.
     @State private var multipleDays = false
     @State private var selectedDays: Set<DateComponents> = []
+    @State private var dayHours: [DateComponents: Double] = [:]
+    @State private var pendingDay: DateComponents? = nil
+    @State private var pendingInput = ""
+    @State private var showHoursPrompt = false
     let descriptions = ["Outside Community Service", "Oakwood Service"]
 
     /// MultiDatePicker only takes a closed-off Range<Date> (no `...Date()`), so cap at the end of
@@ -1162,19 +1205,49 @@ struct AddServiceSheet: View {
         return Date.distantPast..<startOfTomorrow
     }
     private var hoursValue: Double { Double(hours) ?? 0 }
-    /// Selected days resolved to real Dates, oldest first (a Set has no order of its own).
-    private var sortedDays: [Date] {
-        selectedDays.compactMap { Calendar.current.date(from: $0) }.sorted()
+    /// Logged days, oldest first (dictionaries have no order of their own).
+    private var loggedDays: [(components: DateComponents, date: Date, hours: Double)] {
+        dayHours.compactMap { comps, h in Calendar.current.date(from: comps).map { (comps, $0, h) } }
+            .sorted { $0.date < $1.date }
     }
-    private var entryCount: Int { multipleDays ? sortedDays.count : 1 }
-    private var canAdd: Bool { !notes.isEmpty && !hours.isEmpty && (!multipleDays || !selectedDays.isEmpty) }
+    private var totalHours: Double { dayHours.values.reduce(0, +) }
+    private var canAdd: Bool { !notes.isEmpty && (multipleDays ? !dayHours.isEmpty : !hours.isEmpty) }
+
+    private func label(for comps: DateComponents?) -> String {
+        guard let comps, let d = Calendar.current.date(from: comps) else { return "" }
+        return d.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func addEntry(on d: Date, hours: Double) {
+        let f = DateFormatter(); f.dateFormat = "MM/dd/yyyy"
+        appInfo.localServices.append(LocalService(date: f.string(from: d), description: description,
+                                                  notes: notes, hours: hours))
+    }
+
+    private func prompt(for comps: DateComponents) {
+        pendingDay = comps
+        pendingInput = dayHours[comps].map { $0.formatted() } ?? ""
+        showHoursPrompt = true
+    }
+
+    private func confirmPendingHours() {
+        guard let day = pendingDay else { return }
+        if let value = Double(pendingInput), value > 0 { dayHours[day] = value }
+        else if dayHours[day] == nil { selectedDays.remove(day) }   // invalid on a brand-new day: un-pick it
+        pendingDay = nil
+    }
+
+    private func cancelPendingHours() {
+        if let day = pendingDay, dayHours[day] == nil { selectedDays.remove(day) }
+        pendingDay = nil
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Activity (e.g. Food Bank)", text: $notes)
-                    TextField(multipleDays ? "Hours per day" : "Hours", text: $hours).keyboardType(.decimalPad)
+                    if !multipleDays { TextField("Hours", text: $hours).keyboardType(.decimalPad) }
                     Picker("Type", selection: $description) {
                         ForEach(descriptions, id: \.self) { Text($0).tag($0) }
                     }
@@ -1184,26 +1257,55 @@ struct AddServiceSheet: View {
                     Toggle("Multiple days", isOn: $multipleDays.animation())
                     if multipleDays {
                         MultiDatePicker("Dates", selection: $selectedDays, in: selectableDays)
+                            .onChange(of: selectedDays) { old, new in
+                                for removed in old.subtracting(new) { dayHours[removed] = nil }
+                                if let added = new.subtracting(old).first { prompt(for: added) }
+                            }
                     } else {
                         DatePicker("Date", selection: $date, displayedComponents: .date)
                     }
                 } footer: {
-                    if multipleDays && !selectedDays.isEmpty {
-                        Text("\(selectedDays.count) days · \(hoursValue * Double(selectedDays.count), specifier: "%.1f") hrs total")
+                    if multipleDays && dayHours.isEmpty { Text("Tap a day to enter the hours for it.") }
+                }
+
+                if multipleDays && !loggedDays.isEmpty {
+                    Section {
+                        ForEach(loggedDays, id: \.components) { entry in
+                            Button { prompt(for: entry.components) } label: {
+                                HStack {
+                                    Text(entry.date.formatted(date: .complete, time: .omitted)).foregroundColor(.primary)
+                                    Spacer()
+                                    Text("\(entry.hours, specifier: "%.1f") hrs").foregroundColor(.secondary)
+                                }
+                            }
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    selectedDays.remove(entry.components)
+                                } label: { Label("Delete", systemImage: "trash") }
+                            }
+                        }
+                    } header: {
+                        Text("Days")
+                    } footer: {
+                        Text("\(loggedDays.count) \(loggedDays.count == 1 ? "day" : "days") · \(totalHours, specifier: "%.1f") hrs total. Tap a day to change its hours.")
                     }
                 }
             }
             .navigationTitle("Log Hours")
             .inlineNavigationBarTitle()
+            .alert("Hours on \(label(for: pendingDay))", isPresented: $showHoursPrompt) {
+                TextField("Hours", text: $pendingInput).keyboardType(.decimalPad)
+                Button("Save") { confirmPendingHours() }
+                Button("Cancel", role: .cancel) { cancelPendingHours() }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(entryCount > 1 ? "Add \(entryCount)" : "Add") {
-                        let f = DateFormatter(); f.dateFormat = "MM/dd/yyyy"
-                        let dates = multipleDays ? sortedDays : [date]
-                        for d in dates {
-                            appInfo.localServices.append(LocalService(date: f.string(from: d), description: description,
-                                                          notes: notes, hours: hoursValue))
+                    Button(multipleDays && dayHours.count > 1 ? "Add \(dayHours.count)" : "Add") {
+                        if multipleDays {
+                            for entry in loggedDays { addEntry(on: entry.date, hours: entry.hours) }
+                        } else {
+                            addEntry(on: date, hours: hoursValue)
                         }
                         dismiss()
                     }

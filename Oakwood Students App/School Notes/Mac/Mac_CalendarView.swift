@@ -43,7 +43,7 @@ struct Mac_CalendarView: View {
     private var nonPersonalItems: [CalendarItem] {
         var filtered = appInfo.calendarItems.filter { if case .personal = $0 { return false }; return true }
         if !selectedCategories.isEmpty { filtered = filtered.filter { selectedCategories.contains($0.category) } }
-        return filtered
+        return filtered.removingDuplicateSchoolEvents()
     }
 
     private func items(for dayOffset: Int) -> [CalendarItem] {

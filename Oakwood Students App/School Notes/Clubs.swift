@@ -28,6 +28,9 @@ struct ClubsView: View {
     // many tabs), and gets popped whenever appInfo re-publishes — which CloudSync does constantly.
     var body: some View {
         NavigationStack { clubList }
+            // When this tab lives under iOS's "More" overflow, UIKit's own navigation bar adds a
+            // second back button above ours; hide that outer bar while Clubs is on screen.
+            .background(HideOuterNavBar())
     }
 
     private var clubList: some View {
@@ -811,3 +814,30 @@ private func openClubURL(_ string: String) {
     NSWorkspace.shared.open(url)
     #endif
 }
+
+
+#if os(iOS)
+/// Hides the nearest enclosing UIKit navigation bar (e.g. the "More" tab's) while shown.
+private struct HideOuterNavBar: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Holder { Holder() }
+    func updateUIViewController(_ vc: Holder, context: Context) {}
+
+    final class Holder: UIViewController {
+        private var outerNav: UINavigationController? {
+            var vc = parent
+            while let v = vc { if let n = v as? UINavigationController { return n }; vc = v.parent }
+            return nil
+        }
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            outerNav?.setNavigationBarHidden(true, animated: animated)
+        }
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            outerNav?.setNavigationBarHidden(false, animated: animated)
+        }
+    }
+}
+#else
+private struct HideOuterNavBar: View { var body: some View { EmptyView() } }
+#endif

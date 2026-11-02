@@ -273,7 +273,7 @@ private struct Mac_GradeBreakdownPanel: View {
     let course: Course
     @EnvironmentObject var appInfo: AppInfo
 
-    @State private var selectedPeriod = 6  // 6 = S2 (current), 2 = S1
+    @State private var selectedPeriod = currentGradingPeriod()  // 2 = S1, 6 = S2
     @State private var result: GradeDetailResult? = nil
     @State private var isLoading = false
 
@@ -401,6 +401,10 @@ private struct Mac_CourseAssignmentRow: View {
                     Text("NTI")
                         .font(.subheadline)
                         .foregroundStyle(.red)
+                } else if assignment.isNotRequired {
+                    Text("NREQ")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
                 } else if let raw = assignment.raw_score, !raw.isEmpty, let percent = assignment.gradePercent {
                     Text("\(raw) / \(assignment.maximum_score ?? 0)")
                         .font(.subheadline)

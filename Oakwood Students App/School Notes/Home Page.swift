@@ -197,6 +197,9 @@ struct HomeView: View {
                 }
             } else {
             ScrollView {
+                // Banner is the first thing inside the scroll content, rather than a
+                // safeAreaInset on the ScrollView, which on macOS stopped it from scrolling.
+                bannerOverlay
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 350), spacing: 16)], spacing: 16) {
                     ForEach(viewModel.items) { item in
                         NavigationLink(destination: EventView(events: item)) {
@@ -254,7 +257,6 @@ struct HomeView: View {
                     dismissedBanners = []
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) { bannerOverlay }
             }
             #else
             List {
